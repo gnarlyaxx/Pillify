@@ -1,7 +1,3 @@
-// Pillify — Direct2D & DirectWrite Hardware-Accelerated Renderer
-// Renders true mathematical Bezier Notch morphing, audio spectrum bars, File Shelf, Pomodoro/Water, and Notch Customizer
-// into a 32-bit premultiplied-alpha DIB section updated via `UpdateLayeredWindow` at monitor refresh rate (0% CPU when idle).
-
 use crate::config::IslandStyle;
 use crate::state::{ActivePage, AppState, FocusMode, HitZone, InteractiveControl};
 use std::mem::size_of;
@@ -40,10 +36,11 @@ pub struct D2DRenderer {
     mem_dc: HDC,
     dib_bitmap: HBITMAP,
     old_obj: HGDIOBJ,
-    font_bold_13: IDWriteTextFormat,
-    font_semibold_12: IDWriteTextFormat,
+    font_bold_12: IDWriteTextFormat,
+    font_semibold_11: IDWriteTextFormat,
     font_medium_11: IDWriteTextFormat,
     font_regular_10: IDWriteTextFormat,
+    font_mono_11: IDWriteTextFormat,
     font_timer_24: IDWriteTextFormat,
 }
 
@@ -79,7 +76,7 @@ impl D2DRenderer {
                 bmiHeader: BITMAPINFOHEADER {
                     biSize: size_of::<BITMAPINFOHEADER>() as u32,
                     biWidth: CANVAS_W,
-                    biHeight: -CANVAS_H, // top-down DIB
+                    biHeight: -CANVAS_H,
                     biPlanes: 1,
                     biBitCount: 32,
                     biCompression: BI_RGB.0,
@@ -103,9 +100,9 @@ impl D2DRenderer {
 
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
 
-            let make_fmt = |weight, size: f32| -> windows::core::Result<IDWriteTextFormat> {
+            let make_ui_fmt = |weight, size: f32| -> windows::core::Result<IDWriteTextFormat> {
                 let fmt = dwrite.CreateTextFormat(
-                    w!("Segoe UI Variable Display"),
+                    w!("Segoe UI Variable Text"),
                     None,
                     weight,
                     DWRITE_FONT_STYLE_NORMAL,
@@ -118,11 +115,27 @@ impl D2DRenderer {
                 Ok(fmt)
             };
 
-            let font_bold_13 = make_fmt(DWRITE_FONT_WEIGHT_BOLD, 13.0)?;
-            let font_semibold_12 = make_fmt(DWRITE_FONT_WEIGHT_SEMI_BOLD, 11.5)?;
-            let font_medium_11 = make_fmt(DWRITE_FONT_WEIGHT_MEDIUM, 11.0)?;
-            let font_regular_10 = make_fmt(DWRITE_FONT_WEIGHT_REGULAR, 10.0)?;
-            let font_timer_24 = make_fmt(DWRITE_FONT_WEIGHT_BOLD, 22.0)?;
+            let make_mono_fmt = |weight, size: f32| -> windows::core::Result<IDWriteTextFormat> {
+                let fmt = dwrite.CreateTextFormat(
+                    w!("Consolas"),
+                    None,
+                    weight,
+                    DWRITE_FONT_STYLE_NORMAL,
+                    DWRITE_FONT_STRETCH_NORMAL,
+                    size,
+                    w!("en-us"),
+                )?;
+                fmt.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
+                fmt.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
+                Ok(fmt)
+            };
+
+            let font_bold_12 = make_ui_fmt(DWRITE_FONT_WEIGHT_BOLD, 12.5)?;
+            let font_semibold_11 = make_ui_fmt(DWRITE_FONT_WEIGHT_SEMI_BOLD, 11.0)?;
+            let font_medium_11 = make_ui_fmt(DWRITE_FONT_WEIGHT_MEDIUM, 11.0)?;
+            let font_regular_10 = make_ui_fmt(DWRITE_FONT_WEIGHT_REGULAR, 10.0)?;
+            let font_mono_11 = make_mono_fmt(DWRITE_FONT_WEIGHT_SEMI_BOLD, 11.0)?;
+            let font_timer_24 = make_mono_fmt(DWRITE_FONT_WEIGHT_BOLD, 22.0)?;
 
             Ok(Self {
                 d2d_factory,
@@ -130,17 +143,16 @@ impl D2DRenderer {
                 mem_dc,
                 dib_bitmap,
                 old_obj,
-                font_bold_13,
-                font_semibold_12,
+                font_bold_12,
+                font_semibold_11,
                 font_medium_11,
                 font_regular_10,
+                font_mono_11,
                 font_timer_24,
             })
         }
     }
 
-    /// Builds a smooth Bezier path that morphs continuously between a floating rounded capsule (`flare = 0.0`)
-    /// and a MacBook/NUSA concave top-bezel notch (`flare = 1.0`).
     unsafe fn build_island_geometry(
         &self,
         left: f32,
@@ -158,12 +170,10 @@ impl D2DRenderer {
         let h = (bottom - top).max(24.0);
         let r = corner_r.min(w * 0.45).min(h * 0.48);
         let flare_clamped = flare.clamp(0.0, 1.0);
-        // Top ear flare extends outward at the top edge when docked to the bezel
         let ear = ear_r * flare_clamped;
         let top_r = r * (1.0 - flare_clamped);
-        let k = 0.55228475; // cubic Bezier circle approximation constant
+        let k = 0.55228475;
 
-        // Start at top-left (including outward ear flare when flare > 0)
         sink.BeginFigure(
             D2D_POINT_2F {
                 x: left - ear + top_r,
@@ -172,14 +182,12 @@ impl D2DRenderer {
             D2D1_FIGURE_BEGIN_FILLED,
         );
 
-        // Top edge to top-right
         sink.AddLine(D2D_POINT_2F {
             x: right + ear - top_r,
             y: top,
         });
 
         if flare_clamped > 0.02 {
-            // Concave top-right ear curving inward into right vertical wall
             sink.AddBezier(&D2D1_BEZIER_SEGMENT {
                 point1: D2D_POINT_2F {
                     x: right + ear * (1.0 - k),
@@ -195,7 +203,6 @@ impl D2DRenderer {
                 },
             });
         } else if top_r > 0.5 {
-            // Standard convex rounded top-right corner
             sink.AddBezier(&D2D1_BEZIER_SEGMENT {
                 point1: D2D_POINT_2F {
                     x: right - top_r * (1.0 - k),
@@ -212,13 +219,11 @@ impl D2DRenderer {
             });
         }
 
-        // Right vertical edge down to bottom-right corner
         sink.AddLine(D2D_POINT_2F {
             x: right,
             y: bottom - r,
         });
 
-        // Bottom-right rounded corner
         sink.AddBezier(&D2D1_BEZIER_SEGMENT {
             point1: D2D_POINT_2F {
                 x: right,
@@ -234,13 +239,11 @@ impl D2DRenderer {
             },
         });
 
-        // Bottom horizontal edge
         sink.AddLine(D2D_POINT_2F {
             x: left + r,
             y: bottom,
         });
 
-        // Bottom-left rounded corner
         sink.AddBezier(&D2D1_BEZIER_SEGMENT {
             point1: D2D_POINT_2F {
                 x: left + r * (1.0 - k),
@@ -256,7 +259,6 @@ impl D2DRenderer {
             },
         });
 
-        // Left vertical edge up to top-left corner/ear
         let left_top_y = if flare_clamped > 0.02 {
             top + ear
         } else {
@@ -268,7 +270,6 @@ impl D2DRenderer {
         });
 
         if flare_clamped > 0.02 {
-            // Concave top-left ear curving outward to top bezel
             sink.AddBezier(&D2D1_BEZIER_SEGMENT {
                 point1: D2D_POINT_2F {
                     x: left,
@@ -350,7 +351,6 @@ impl D2DRenderer {
         }
     }
 
-    /// Computes exact bounding rectangle of the active island capsule for mouse hit-testing (`WM_NCHITTEST`).
     pub fn island_bounds(state: &AppState) -> (f32, f32, f32, f32) {
         let scale = state.animator.hover_scale.value;
         let w = state.animator.width.value * scale;
@@ -377,36 +377,32 @@ impl D2DRenderer {
             return;
         };
 
-        // Deep obsidian background brush (#0B0C10)
+        // Solid pitch-black matte surface (#09090B)
         let Ok(bg_brush) = self
             .dc_target
-            .CreateSolidColorBrush(&color(0.043, 0.047, 0.063, 0.97), None)
+            .CreateSolidColorBrush(&color(0.035, 0.035, 0.043, 0.99), None)
         else {
             return;
         };
         self.dc_target.FillGeometry(&geo, &bg_brush, None);
 
-        // Outer subtle glass border + Accent Glow when hovered or dragging files
-        let glow_alpha = if state.is_drag_hovering {
-            0.85
-        } else if state.is_hovered {
-            (state.config.border_glow_opacity + 0.16).min(0.85)
+        // Crisp 1px structural hairline border
+        let border_alpha = if state.is_hovered {
+            (state.config.border_glow_opacity + 0.08).min(0.45)
         } else {
             state.config.border_glow_opacity
         };
         if let Ok(border_brush) = self
             .dc_target
-            .CreateSolidColorBrush(&color(acc_r, acc_g, acc_b, glow_alpha), None)
+            .CreateSolidColorBrush(&color(1.0, 1.0, 1.0, border_alpha), None)
         {
-            self.dc_target
-                .DrawGeometry(&geo, &border_brush, if state.is_hovered { 1.4 } else { 1.0 }, None);
+            self.dc_target.DrawGeometry(&geo, &border_brush, 1.0, None);
         }
 
         let expand = state.animator.expand_progress.value.clamp(0.0, 1.0);
         let osd_blend = state.animator.osd_blend.value.clamp(0.0, 1.0);
         let alert_blend = state.animator.compact_alert_blend.value.clamp(0.0, 1.0);
 
-        // Draw Compact Bar when expand_progress < 0.75
         if expand < 0.75 {
             let compact_alpha = ((0.75 - expand) / 0.75).clamp(0.0, 1.0);
             if osd_blend > 0.2 {
@@ -443,7 +439,6 @@ impl D2DRenderer {
             }
         }
 
-        // Draw Expanded Multi-Page Dashboard when expand_progress > 0.25
         if expand > 0.25 {
             let exp_alpha = ((expand - 0.25) / 0.75).clamp(0.0, 1.0);
             self.draw_expanded_dashboard(
@@ -458,7 +453,6 @@ impl D2DRenderer {
             );
         }
 
-        // Register fallback click zone on the island body itself
         state.hit_zones.push(HitZone {
             left,
             top,
@@ -482,44 +476,42 @@ impl D2DRenderer {
         let mid_y = (top + bottom) * 0.5;
         let pad_x = 16.0;
 
-        // Left: Current Time (or Pomodoro countdown if running)
         let left_label = if state.timer_running {
-            format!("⏱ {}", state.timer_formatted())
+            state.timer_formatted()
         } else {
             state.current_time_str.clone()
         };
         self.draw_text(
             &left_label,
-            &self.font_bold_13,
+            &self.font_mono_11,
             D2D_RECT_F {
                 left: left + pad_x,
                 top,
-                right: left + 100.0,
+                right: left + 90.0,
                 bottom,
             },
-            color(0.98, 0.98, 1.0, alpha),
+            color(0.96, 0.96, 0.97, alpha),
             DWRITE_TEXT_ALIGNMENT_LEADING,
         );
 
-        // Center: Animated 6-bar Audio Equalizer + Song Title when playing music
         if state.is_music_active() {
-            let spec_x = left + 70.0;
+            let spec_x = left + 64.0;
             if let Ok(bar_brush) = self
                 .dc_target
                 .CreateSolidColorBrush(&color(accent.0, accent.1, accent.2, alpha), None)
             {
-                for (i, &amp) in state.audio_spectrum.iter().enumerate() {
-                    let bx = spec_x + (i as f32) * 4.5;
-                    let bh = (4.0 + amp * 14.0).clamp(4.0, 18.0);
+                for (idx, &amp) in state.audio_spectrum.iter().enumerate() {
+                    let bx = spec_x + (idx as f32) * 4.0;
+                    let bh = (3.0 + amp * 12.0).clamp(3.0, 15.0);
                     let rrect = D2D1_ROUNDED_RECT {
                         rect: D2D_RECT_F {
                             left: bx,
                             top: mid_y - bh * 0.5,
-                            right: bx + 2.8,
+                            right: bx + 2.2,
                             bottom: mid_y + bh * 0.5,
                         },
-                        radiusX: 1.4,
-                        radiusY: 1.4,
+                        radiusX: 1.1,
+                        radiusY: 1.1,
                     };
                     self.dc_target.FillRoundedRectangle(&rrect, &bar_brush);
                 }
@@ -528,53 +520,52 @@ impl D2DRenderer {
             let song_label = if state.artist_name.is_empty() {
                 state.song_title.clone()
             } else {
-                format!("{} • {}", state.song_title, state.artist_name)
+                format!("{} — {}", state.song_title, state.artist_name)
             };
             let chars: String = song_label.chars().take(24).collect();
             self.draw_text(
                 &chars,
-                &self.font_semibold_12,
+                &self.font_medium_11,
                 D2D_RECT_F {
-                    left: spec_x + 32.0,
+                    left: spec_x + 28.0,
                     top,
-                    right: right - 82.0,
+                    right: right - 74.0,
                     bottom,
                 },
-                color(accent.0, accent.1, accent.2, alpha),
+                color(0.92, 0.92, 0.94, alpha),
                 DWRITE_TEXT_ALIGNMENT_LEADING,
             );
         }
 
-        // Right: Wi-Fi status dot + Battery pill & percentage
-        let wifi_dot_color = if state.network_connected {
-            color(accent.0, accent.1, accent.2, alpha)
+        let status_dot_color = if state.network_connected {
+            color(0.20, 0.84, 0.48, alpha)
         } else {
-            color(1.0, 0.35, 0.35, alpha)
+            color(0.92, 0.28, 0.28, alpha)
         };
-        if let Ok(dot_brush) = self.dc_target.CreateSolidColorBrush(&wifi_dot_color, None) {
+        if let Ok(dot_brush) = self.dc_target.CreateSolidColorBrush(&status_dot_color, None) {
             let rrect = D2D1_ROUNDED_RECT {
                 rect: D2D_RECT_F {
-                    left: right - 68.0,
-                    top: mid_y - 3.5,
-                    right: right - 61.0,
-                    bottom: mid_y + 3.5,
+                    left: right - 58.0,
+                    top: mid_y - 2.5,
+                    right: right - 53.0,
+                    bottom: mid_y + 2.5,
                 },
-                radiusX: 3.5,
-                radiusY: 3.5,
+                radiusX: 2.5,
+                radiusY: 2.5,
             };
             self.dc_target.FillRoundedRectangle(&rrect, &dot_brush);
         }
 
         let bat_label = if state.is_charging {
-            format!("⚡{}%", state.battery_percent)
+            format!("{}+", state.battery_percent)
         } else {
             format!("{}%", state.battery_percent)
         };
         self.draw_text(
             &bat_label,
-            &self.font_semibold_12,
+            &self.font_mono_11,
             D2D_RECT_F {
-                left: right - 58.0,
+                left: right - 50.0,
                 top,
                 right: right - pad_x,
                 bottom,
@@ -596,41 +587,41 @@ impl D2DRenderer {
     ) {
         let mid_y = (top + bottom) * 0.5;
         let label = if state.is_muted {
-            "🔇 Muted".to_string()
+            "MUTE".to_string()
         } else {
-            format!("🔊 {}%", state.volume_percent)
+            format!("VOL {:02}", state.volume_percent)
         };
         self.draw_text(
             &label,
-            &self.font_bold_13,
+            &self.font_mono_11,
             D2D_RECT_F {
                 left: left + 16.0,
                 top,
-                right: left + 95.0,
+                right: left + 82.0,
                 bottom,
             },
-            color(1.0, 1.0, 1.0, alpha),
+            color(0.96, 0.96, 0.97, alpha),
             DWRITE_TEXT_ALIGNMENT_LEADING,
         );
 
-        let bar_l = left + 98.0;
-        let bar_r = right - 18.0;
+        let bar_l = left + 84.0;
+        let bar_r = right - 16.0;
         let bar_w = (bar_r - bar_l).max(20.0);
 
         if let Ok(track_brush) = self
             .dc_target
-            .CreateSolidColorBrush(&color(1.0, 1.0, 1.0, 0.16 * alpha), None)
+            .CreateSolidColorBrush(&color(1.0, 1.0, 1.0, 0.14 * alpha), None)
         {
             self.dc_target.FillRoundedRectangle(
                 &D2D1_ROUNDED_RECT {
                     rect: D2D_RECT_F {
                         left: bar_l,
-                        top: mid_y - 3.5,
+                        top: mid_y - 2.0,
                         right: bar_r,
-                        bottom: mid_y + 3.5,
+                        bottom: mid_y + 2.0,
                     },
-                    radiusX: 3.5,
-                    radiusY: 3.5,
+                    radiusX: 2.0,
+                    radiusY: 2.0,
                 },
                 &track_brush,
             );
@@ -650,12 +641,12 @@ impl D2DRenderer {
                     &D2D1_ROUNDED_RECT {
                         rect: D2D_RECT_F {
                             left: bar_l,
-                            top: mid_y - 3.5,
+                            top: mid_y - 2.0,
                             right: bar_l + bar_w * fill_ratio,
-                            bottom: mid_y + 3.5,
+                            bottom: mid_y + 2.0,
                         },
-                        radiusX: 3.5,
-                        radiusY: 3.5,
+                        radiusX: 2.0,
+                        radiusY: 2.0,
                     },
                     &fill_brush,
                 );
@@ -681,29 +672,29 @@ impl D2DRenderer {
             self.dc_target.FillRoundedRectangle(
                 &D2D1_ROUNDED_RECT {
                     rect: D2D_RECT_F {
-                        left: left + 14.0,
-                        top: mid_y - 9.0,
-                        right: left + 32.0,
-                        bottom: mid_y + 9.0,
+                        left: left + 16.0,
+                        top: mid_y - 3.0,
+                        right: left + 22.0,
+                        bottom: mid_y + 3.0,
                     },
-                    radiusX: 9.0,
-                    radiusY: 9.0,
+                    radiusX: 3.0,
+                    radiusY: 3.0,
                 },
                 &badge_brush,
             );
         }
 
-        let summary = format!("{} • {}", state.toast_title, state.toast_app);
+        let summary = format!("{}  /  {}", state.toast_app.to_uppercase(), state.toast_title);
         self.draw_text(
             &summary,
-            &self.font_bold_13,
+            &self.font_semibold_11,
             D2D_RECT_F {
-                left: left + 40.0,
+                left: left + 30.0,
                 top,
-                right: right - 18.0,
+                right: right - 16.0,
                 bottom,
             },
-            color(1.0, 1.0, 1.0, alpha),
+            color(0.96, 0.96, 0.97, alpha),
             DWRITE_TEXT_ALIGNMENT_LEADING,
         );
     }
@@ -721,14 +712,14 @@ impl D2DRenderer {
     ) {
         let pad_x = 20.0;
         let header_top = top + 12.0;
-        let header_bottom = header_top + 26.0;
+        let header_bottom = header_top + 24.0;
 
-        // Top Navigation Pill Bar: [🎵 Media] [📥 Shelf] [⏱ Focus] [✨ Notch]   [✕]
+        // Clean typographic navigation bar without emojis
         let tabs = [
-            (ActivePage::Media, "🎵 Media", 74.0),
-            (ActivePage::Shelf, "📥 Shelf", 72.0),
-            (ActivePage::Productivity, "⏱ Focus", 72.0),
-            (ActivePage::Customize, "✨ Notch", 76.0),
+            (ActivePage::Media, "MEDIA", 64.0),
+            (ActivePage::Shelf, "SHELF", 64.0),
+            (ActivePage::Productivity, "FOCUS", 64.0),
+            (ActivePage::Customize, "CONFIG", 68.0),
         ];
 
         let mut cur_x = left + pad_x;
@@ -742,7 +733,7 @@ impl D2DRenderer {
                 right: cur_x + tab_w,
                 bottom: header_bottom,
             };
-            self.draw_pill_button(rect, label, active, hovered, alpha, accent);
+            self.draw_action_chip(rect, label, active, hovered, alpha, accent);
             state.hit_zones.push(HitZone {
                 left: rect.left,
                 top: rect.top,
@@ -753,15 +744,14 @@ impl D2DRenderer {
             cur_x += tab_w + 6.0;
         }
 
-        // Collapse button [✕] on top-right
         let close_rect = D2D_RECT_F {
-            left: right - pad_x - 28.0,
+            left: right - pad_x - 42.0,
             top: header_top,
             right: right - pad_x,
             bottom: header_bottom,
         };
         let close_hovered = state.hovered_control == Some(InteractiveControl::CollapseButton);
-        self.draw_pill_button(close_rect, "✕", false, close_hovered, alpha, accent);
+        self.draw_action_chip(close_rect, "HIDE", false, close_hovered, alpha, accent);
         state.hit_zones.push(HitZone {
             left: close_rect.left,
             top: close_rect.top,
@@ -770,8 +760,29 @@ impl D2DRenderer {
             control: InteractiveControl::CollapseButton,
         });
 
-        let content_top = header_bottom + 10.0;
-        let content_bottom = bottom - 22.0;
+        // 1px structural divider below header
+        let divider_y = header_bottom + 7.0;
+        if let Ok(div_brush) = self
+            .dc_target
+            .CreateSolidColorBrush(&color(1.0, 1.0, 1.0, 0.08 * alpha), None)
+        {
+            self.dc_target.DrawLine(
+                D2D_POINT_2F {
+                    x: left + pad_x,
+                    y: divider_y,
+                },
+                D2D_POINT_2F {
+                    x: right - pad_x,
+                    y: divider_y,
+                },
+                &div_brush,
+                1.0,
+                None,
+            );
+        }
+
+        let content_top = divider_y + 9.0;
+        let content_bottom = bottom - 16.0;
 
         match state.page {
             ActivePage::Media => {
@@ -821,35 +832,6 @@ impl D2DRenderer {
                 );
             }
         }
-
-        // Bottom Pagination Indicator Dots
-        let center_x = (left + right) * 0.5;
-        let dot_y = bottom - 11.0;
-        for i in 0..4 {
-            let active = state.page.index() == i;
-            let dx = center_x - 21.0 + (i as f32) * 14.0;
-            let dot_w = if active { 10.0 } else { 5.0 };
-            let dot_c = if active {
-                color(accent.0, accent.1, accent.2, alpha)
-            } else {
-                color(1.0, 1.0, 1.0, 0.25 * alpha)
-            };
-            if let Ok(b) = self.dc_target.CreateSolidColorBrush(&dot_c, None) {
-                self.dc_target.FillRoundedRectangle(
-                    &D2D1_ROUNDED_RECT {
-                        rect: D2D_RECT_F {
-                            left: dx - dot_w * 0.5,
-                            top: dot_y - 2.5,
-                            right: dx + dot_w * 0.5,
-                            bottom: dot_y + 2.5,
-                        },
-                        radiusX: 2.5,
-                        radiusY: 2.5,
-                    },
-                    &b,
-                );
-            }
-        }
     }
 
     unsafe fn draw_page_media(
@@ -863,108 +845,105 @@ impl D2DRenderer {
         accent: (f32, f32, f32),
         secondary: (f32, f32, f32),
     ) {
-        // Album art / Visualizer card on the left
+        // Minimal equalizer block
         let art_rect = D2D_RECT_F {
             left,
             top,
-            right: left + 52.0,
-            bottom: top + 52.0,
+            right: left + 46.0,
+            bottom: top + 46.0,
         };
         if let Ok(card_brush) = self
             .dc_target
-            .CreateSolidColorBrush(&color(accent.0, accent.1, accent.2, 0.16 * alpha), None)
+            .CreateSolidColorBrush(&color(1.0, 1.0, 1.0, 0.04 * alpha), None)
         {
             self.dc_target.FillRoundedRectangle(
                 &D2D1_ROUNDED_RECT {
                     rect: art_rect,
-                    radiusX: 12.0,
-                    radiusY: 12.0,
+                    radiusX: 6.0,
+                    radiusY: 6.0,
                 },
                 &card_brush,
             );
         }
 
-        // Animated spectrum inside the album tile
-        let mid_art_y = top + 26.0;
+        let mid_art_y = top + 23.0;
         if let Ok(spec_brush) = self
             .dc_target
             .CreateSolidColorBrush(&color(accent.0, accent.1, accent.2, alpha), None)
         {
-            for (i, &amp) in state.audio_spectrum.iter().enumerate() {
-                let bx = left + 10.0 + (i as f32) * 5.6;
+            for (idx, &amp) in state.audio_spectrum.iter().enumerate() {
+                let bx = left + 8.0 + (idx as f32) * 5.2;
                 let bh = if state.is_playing {
-                    6.0 + amp * 22.0
+                    4.0 + amp * 20.0
                 } else {
-                    6.0
+                    4.0
                 };
                 self.dc_target.FillRoundedRectangle(
                     &D2D1_ROUNDED_RECT {
                         rect: D2D_RECT_F {
                             left: bx,
                             top: mid_art_y - bh * 0.5,
-                            right: bx + 3.4,
+                            right: bx + 2.8,
                             bottom: mid_art_y + bh * 0.5,
                         },
-                        radiusX: 1.7,
-                        radiusY: 1.7,
+                        radiusX: 1.4,
+                        radiusY: 1.4,
                     },
                     &spec_brush,
                 );
             }
         }
 
-        // Song Title & Artist
         let title_str = if state.song_title.is_empty() {
-            "No Active Media Session"
+            "Idle Audio Session"
         } else {
             &state.song_title
         };
         let artist_str = if state.artist_name.is_empty() {
-            "Spotify • YouTube • System Audio"
+            "System Media Transport"
         } else {
             &state.artist_name
         };
 
         self.draw_text(
             title_str,
-            &self.font_bold_13,
+            &self.font_bold_12,
             D2D_RECT_F {
-                left: left + 64.0,
-                top: top + 4.0,
-                right: right - 118.0,
-                bottom: top + 26.0,
+                left: left + 56.0,
+                top: top + 2.0,
+                right: right - 134.0,
+                bottom: top + 24.0,
             },
-            color(1.0, 1.0, 1.0, alpha),
+            color(0.96, 0.96, 0.97, alpha),
             DWRITE_TEXT_ALIGNMENT_LEADING,
         );
 
         self.draw_text(
             artist_str,
-            &self.font_medium_11,
+            &self.font_regular_10,
             D2D_RECT_F {
-                left: left + 64.0,
-                top: top + 26.0,
-                right: right - 118.0,
-                bottom: top + 48.0,
+                left: left + 56.0,
+                top: top + 24.0,
+                right: right - 134.0,
+                bottom: top + 44.0,
             },
-            color(0.68, 0.70, 0.76, alpha),
+            color(0.58, 0.58, 0.62, alpha),
             DWRITE_TEXT_ALIGNMENT_LEADING,
         );
 
-        // Transport Buttons: [⏮] [⏯] [⏭]
-        let btn_y1 = top + 11.0;
-        let btn_y2 = top + 41.0;
+        let btn_y1 = top + 10.0;
+        let btn_y2 = top + 36.0;
         let transport = [
-            (InteractiveControl::MediaPrev, "⏮", right - 106.0, right - 74.0),
+            (InteractiveControl::MediaPrev, "PREV", right - 128.0, right - 88.0),
             (
                 InteractiveControl::MediaPlayPause,
-                if state.is_playing { "⏸" } else { "▶" },
-                right - 70.0,
-                right - 36.0,
+                if state.is_playing { "PAUSE" } else { "PLAY" },
+                right - 84.0,
+                right - 42.0,
             ),
-            (InteractiveControl::MediaNext, "⏭", right - 32.0, right),
+            (InteractiveControl::MediaNext, "NEXT", right - 38.0, right),
         ];
-        for (ctrl, icon, x1, x2) in transport {
+        for (ctrl, label, x1, x2) in transport {
             let r = D2D_RECT_F {
                 left: x1,
                 top: btn_y1,
@@ -973,7 +952,7 @@ impl D2DRenderer {
             };
             let hov = state.hovered_control == Some(ctrl);
             let primary = ctrl == InteractiveControl::MediaPlayPause && state.is_playing;
-            self.draw_pill_button(r, icon, primary, hov, alpha, accent);
+            self.draw_action_chip(r, label, primary, hov, alpha, accent);
             state.hit_zones.push(HitZone {
                 left: r.left,
                 top: r.top,
@@ -983,53 +962,54 @@ impl D2DRenderer {
             });
         }
 
-        // Synced Lyric / Live Audio Banner
-        let lyric_rect = D2D_RECT_F {
+        // Clean technical readout line
+        let readout_rect = D2D_RECT_F {
             left,
-            top: top + 60.0,
+            top: top + 56.0,
             right,
-            bottom: top + 86.0,
+            bottom: top + 80.0,
         };
-        if let Ok(l_brush) = self
+        if let Ok(line_bg) = self
             .dc_target
-            .CreateSolidColorBrush(&color(1.0, 1.0, 1.0, 0.06 * alpha), None)
+            .CreateSolidColorBrush(&color(1.0, 1.0, 1.0, 0.03 * alpha), None)
         {
             self.dc_target.FillRoundedRectangle(
                 &D2D1_ROUNDED_RECT {
-                    rect: lyric_rect,
-                    radiusX: 8.0,
-                    radiusY: 8.0,
+                    rect: readout_rect,
+                    radiusX: 4.0,
+                    radiusY: 4.0,
                 },
-                &l_brush,
+                &line_bg,
             );
         }
         self.draw_text(
             &state.synced_lyric_line,
-            &self.font_medium_11,
+            &self.font_mono_11,
             D2D_RECT_F {
                 left: left + 10.0,
-                top: lyric_rect.top,
+                top: readout_rect.top,
                 right: right - 10.0,
-                bottom: lyric_rect.bottom,
+                bottom: readout_rect.bottom,
             },
-            color(accent.0, accent.1, accent.2, alpha),
-            DWRITE_TEXT_ALIGNMENT_CENTER,
+            color(0.76, 0.76, 0.80, alpha),
+            DWRITE_TEXT_ALIGNMENT_LEADING,
         );
 
-        // Bottom Row: Telemetry + Focus Mode Chips
-        let row_y1 = bottom - 28.0;
-        let row_y2 = bottom - 2.0;
-        let net_bat = format!(
-            "📶 {}   •   ⚡ {}%   •   🔊 {}%",
-            state.wifi_ssid, state.battery_percent, state.volume_percent
+        let row_y1 = bottom - 24.0;
+        let row_y2 = bottom;
+        let telemetry = format!(
+            "NET {}   //   BAT {}%   //   VOL {}%",
+            state.wifi_ssid.to_uppercase(),
+            state.battery_percent,
+            state.volume_percent
         );
         self.draw_text(
-            &net_bat,
-            &self.font_regular_10,
+            &telemetry,
+            &self.font_mono_11,
             D2D_RECT_F {
                 left,
                 top: row_y1,
-                right: right - 165.0,
+                right: right - 166.0,
                 bottom: row_y2,
             },
             color(secondary.0, secondary.1, secondary.2, alpha),
@@ -1037,9 +1017,9 @@ impl D2DRenderer {
         );
 
         let chips = [
-            (FocusMode::None, "Normal", right - 160.0, right - 110.0),
-            (FocusMode::Gaming, "🎮 Game", right - 106.0, right - 54.0),
-            (FocusMode::Movie, "🎬 Movie", right - 50.0, right),
+            (FocusMode::None, "STD", right - 156.0, right - 108.0),
+            (FocusMode::Gaming, "DND", right - 104.0, right - 54.0),
+            (FocusMode::Movie, "MUTE", right - 50.0, right),
         ];
         for (fmode, label, x1, x2) in chips {
             let ctrl = InteractiveControl::FocusChip(fmode);
@@ -1051,7 +1031,7 @@ impl D2DRenderer {
             };
             let active = state.focus_mode == fmode;
             let hov = state.hovered_control == Some(ctrl);
-            self.draw_pill_button(r, label, active, hov, alpha, accent);
+            self.draw_action_chip(r, label, active, hov, alpha, accent);
             state.hit_zones.push(HitZone {
                 left: r.left,
                 top: r.top,
@@ -1075,125 +1055,85 @@ impl D2DRenderer {
         if state.shelf_items.is_empty() {
             let box_rect = D2D_RECT_F {
                 left,
-                top: top + 4.0,
+                top: top + 2.0,
                 right,
-                bottom: bottom - 6.0,
+                bottom: bottom - 4.0,
             };
-            if let Ok(fill) = self
-                .dc_target
-                .CreateSolidColorBrush(&color(1.0, 1.0, 1.0, 0.05 * alpha), None)
-            {
-                self.dc_target.FillRoundedRectangle(
-                    &D2D1_ROUNDED_RECT {
-                        rect: box_rect,
-                        radiusX: 12.0,
-                        radiusY: 12.0,
-                    },
-                    &fill,
-                );
-            }
             if let Ok(stroke) = self
                 .dc_target
-                .CreateSolidColorBrush(&color(accent.0, accent.1, accent.2, 0.35 * alpha), None)
+                .CreateSolidColorBrush(&color(1.0, 1.0, 1.0, 0.14 * alpha), None)
             {
                 self.dc_target.DrawRoundedRectangle(
                     &D2D1_ROUNDED_RECT {
                         rect: box_rect,
-                        radiusX: 12.0,
-                        radiusY: 12.0,
+                        radiusX: 6.0,
+                        radiusY: 6.0,
                     },
                     &stroke,
-                    1.2,
+                    1.0,
                     None,
                 );
             }
 
             self.draw_text(
-                "📥 Drag & Drop Files or Folders Into Pillify",
-                &self.font_bold_13,
+                "DROP FILES OR DIRECTORIES HERE",
+                &self.font_mono_11,
                 D2D_RECT_F {
                     left,
                     top: top + 28.0,
                     right,
-                    bottom: top + 56.0,
+                    bottom: top + 52.0,
                 },
-                color(1.0, 1.0, 1.0, alpha),
+                color(0.92, 0.92, 0.95, alpha),
                 DWRITE_TEXT_ALIGNMENT_CENTER,
             );
             self.draw_text(
-                "Pin frequent files here for instant 1-click launch",
-                &self.font_medium_11,
+                "Staged paths persist locally for instant launch",
+                &self.font_regular_10,
                 D2D_RECT_F {
                     left,
-                    top: top + 56.0,
+                    top: top + 52.0,
                     right,
-                    bottom: top + 82.0,
+                    bottom: top + 74.0,
                 },
-                color(0.65, 0.68, 0.74, alpha),
+                color(0.55, 0.55, 0.60, alpha),
                 DWRITE_TEXT_ALIGNMENT_CENTER,
             );
             return;
         }
 
-        // Render up to 4 cards horizontally
-        let card_w = 94.0;
-        let card_h = 84.0;
-        let gap = 8.0;
-        for (idx, item) in state.shelf_items.iter().take(4).enumerate() {
-            let cx = left + (idx as f32) * (card_w + gap);
-            let card_rect = D2D_RECT_F {
-                left: cx,
-                top: top + 2.0,
-                right: cx + card_w,
-                bottom: top + 2.0 + card_h,
+        // Structured list rows instead of generic card grid
+        let row_h = 24.0;
+        for (idx, entry) in state.shelf_items.iter().take(3).enumerate() {
+            let ry = top + (idx as f32) * (row_h + 4.0);
+            let row_rect = D2D_RECT_F {
+                left,
+                top: ry,
+                right: right - 32.0,
+                bottom: ry + row_h,
             };
             let open_ctrl = InteractiveControl::ShelfOpenItem(idx);
             let rem_ctrl = InteractiveControl::ShelfRemoveItem(idx);
             let hov = state.hovered_control == Some(open_ctrl);
 
-            let bg_a = if hov { 0.16 } else { 0.08 };
-            if let Ok(b) = self
-                .dc_target
-                .CreateSolidColorBrush(&color(1.0, 1.0, 1.0, bg_a * alpha), None)
-            {
-                self.dc_target.FillRoundedRectangle(
-                    &D2D1_ROUNDED_RECT {
-                        rect: card_rect,
-                        radiusX: 10.0,
-                        radiusY: 10.0,
-                    },
-                    &b,
-                );
-            }
+            let row_label = format!("[{}]  {}", entry.extension_badge, entry.display_name);
+            self.draw_action_chip(row_rect, &row_label, false, hov, alpha, accent);
+            state.hit_zones.push(HitZone {
+                left: row_rect.left,
+                top: row_rect.top,
+                right: row_rect.right,
+                bottom: row_rect.bottom,
+                control: open_ctrl,
+            });
 
-            // Extension badge
-            self.draw_text(
-                &item.extension_badge,
-                &self.font_bold_13,
-                D2D_RECT_F {
-                    left: cx + 8.0,
-                    top: card_rect.top + 10.0,
-                    right: cx + card_w - 24.0,
-                    bottom: card_rect.top + 34.0,
-                },
-                color(accent.0, accent.1, accent.2, alpha),
-                DWRITE_TEXT_ALIGNMENT_LEADING,
-            );
-
-            // Remove [✕] mini button
             let rem_rect = D2D_RECT_F {
-                left: card_rect.right - 22.0,
-                top: card_rect.top + 4.0,
-                right: card_rect.right - 4.0,
-                bottom: card_rect.top + 22.0,
+                left: right - 28.0,
+                top: ry,
+                right,
+                bottom: ry + row_h,
             };
-            self.draw_text(
-                "✕",
-                &self.font_regular_10,
-                rem_rect,
-                color(0.75, 0.75, 0.80, alpha),
-                DWRITE_TEXT_ALIGNMENT_CENTER,
-            );
+            let rem_hov = state.hovered_control == Some(rem_ctrl);
+            self.draw_action_chip(rem_rect, "DEL", false, rem_hov, alpha, accent);
             state.hit_zones.push(HitZone {
                 left: rem_rect.left,
                 top: rem_rect.top,
@@ -1201,48 +1141,21 @@ impl D2DRenderer {
                 bottom: rem_rect.bottom,
                 control: rem_ctrl,
             });
-
-            // File name truncated
-            let short_name: String = item.display_name.chars().take(12).collect();
-            self.draw_text(
-                &short_name,
-                &self.font_medium_11,
-                D2D_RECT_F {
-                    left: cx + 6.0,
-                    top: card_rect.top + 48.0,
-                    right: card_rect.right - 6.0,
-                    bottom: card_rect.bottom - 6.0,
-                },
-                color(0.95, 0.95, 0.98, alpha),
-                DWRITE_TEXT_ALIGNMENT_LEADING,
-            );
-
-            state.hit_zones.push(HitZone {
-                left: card_rect.left,
-                top: card_rect.top + 22.0,
-                right: card_rect.right,
-                bottom: card_rect.bottom,
-                control: open_ctrl,
-            });
         }
 
-        // Footer: Item count + Clear All button
-        let footer_y1 = bottom - 26.0;
-        let footer_y2 = bottom - 2.0;
-        let count_str = format!(
-            "{} item(s) in Shelf • Click card to open",
-            state.shelf_items.len()
-        );
+        let footer_y1 = bottom - 24.0;
+        let footer_y2 = bottom;
+        let count_str = format!("{} STAGED ITEMS", state.shelf_items.len());
         self.draw_text(
             &count_str,
-            &self.font_regular_10,
+            &self.font_mono_11,
             D2D_RECT_F {
                 left,
                 top: footer_y1,
                 right: right - 90.0,
                 bottom: footer_y2,
             },
-            color(0.68, 0.70, 0.76, alpha),
+            color(0.58, 0.58, 0.62, alpha),
             DWRITE_TEXT_ALIGNMENT_LEADING,
         );
 
@@ -1253,7 +1166,7 @@ impl D2DRenderer {
             bottom: footer_y2,
         };
         let hov_clear = state.hovered_control == Some(InteractiveControl::ShelfClearAll);
-        self.draw_pill_button(clear_rect, "Clear All", false, hov_clear, alpha, accent);
+        self.draw_action_chip(clear_rect, "CLEAR ALL", false, hov_clear, alpha, accent);
         state.hit_zones.push(HitZone {
             left: clear_rect.left,
             top: clear_rect.top,
@@ -1274,19 +1187,18 @@ impl D2DRenderer {
         accent: (f32, f32, f32),
         secondary: (f32, f32, f32),
     ) {
-        // Left Panel: Pomodoro Timer + Presets
         let mid_x = (left + right) * 0.5 - 6.0;
 
         self.draw_text(
             &state.timer_mode_label,
-            &self.font_semibold_12,
+            &self.font_mono_11,
             D2D_RECT_F {
                 left,
                 top,
                 right: mid_x,
-                bottom: top + 20.0,
+                bottom: top + 18.0,
             },
-            color(accent.0, accent.1, accent.2, alpha),
+            color(secondary.0, secondary.1, secondary.2, alpha),
             DWRITE_TEXT_ALIGNMENT_LEADING,
         );
 
@@ -1296,25 +1208,24 @@ impl D2DRenderer {
             &self.font_timer_24,
             D2D_RECT_F {
                 left,
-                top: top + 20.0,
-                right: left + 95.0,
-                bottom: top + 56.0,
+                top: top + 18.0,
+                right: left + 92.0,
+                bottom: top + 52.0,
             },
-            color(1.0, 1.0, 1.0, alpha),
+            color(0.96, 0.96, 0.97, alpha),
             DWRITE_TEXT_ALIGNMENT_LEADING,
         );
 
-        // Start/Pause & Reset buttons
         let toggle_rect = D2D_RECT_F {
-            left: left + 98.0,
-            top: top + 24.0,
-            right: left + 150.0,
-            bottom: top + 50.0,
+            left: left + 96.0,
+            top: top + 22.0,
+            right: left + 148.0,
+            bottom: top + 46.0,
         };
         let hov_tog = state.hovered_control == Some(InteractiveControl::PomodoroToggle);
-        self.draw_pill_button(
+        self.draw_action_chip(
             toggle_rect,
-            if state.timer_running { "Pause" } else { "Start" },
+            if state.timer_running { "PAUSE" } else { "START" },
             state.timer_running,
             hov_tog,
             alpha,
@@ -1329,13 +1240,13 @@ impl D2DRenderer {
         });
 
         let rst_rect = D2D_RECT_F {
-            left: left + 154.0,
-            top: top + 24.0,
+            left: left + 152.0,
+            top: top + 22.0,
             right: mid_x,
-            bottom: top + 50.0,
+            bottom: top + 46.0,
         };
         let hov_rst = state.hovered_control == Some(InteractiveControl::PomodoroReset);
-        self.draw_pill_button(rst_rect, "↺", false, hov_rst, alpha, accent);
+        self.draw_action_chip(rst_rect, "RST", false, hov_rst, alpha, accent);
         state.hit_zones.push(HitZone {
             left: rst_rect.left,
             top: rst_rect.top,
@@ -1344,20 +1255,19 @@ impl D2DRenderer {
             control: InteractiveControl::PomodoroReset,
         });
 
-        // Presets: [25m] [5m] [15m]
-        let presets = [(25u32, "25m"), (5u32, "5m"), (15u32, "15m")];
-        for (i, (mins, lbl)) in presets.iter().enumerate() {
-            let px = left + (i as f32) * 62.0;
+        let presets = [(25u32, "25M"), (5u32, "05M"), (15u32, "15M")];
+        for (idx, (mins, lbl)) in presets.iter().enumerate() {
+            let px = left + (idx as f32) * 62.0;
             let pre_rect = D2D_RECT_F {
                 left: px,
-                top: top + 60.0,
+                top: top + 56.0,
                 right: px + 56.0,
-                bottom: top + 84.0,
+                bottom: top + 78.0,
             };
             let ctrl = InteractiveControl::PomodoroPreset(*mins);
             let active = state.timer_total_secs == mins * 60;
             let hov = state.hovered_control == Some(ctrl);
-            self.draw_pill_button(pre_rect, lbl, active, hov, alpha, accent);
+            self.draw_action_chip(pre_rect, lbl, active, hov, alpha, accent);
             state.hit_zones.push(HitZone {
                 left: pre_rect.left,
                 top: pre_rect.top,
@@ -1367,19 +1277,18 @@ impl D2DRenderer {
             });
         }
 
-        // Hydration Tracker Row (bottom-left)
         let water_str = format!(
-            "💧 Water: {}/{} glasses",
+            "HYDRATION  {}/{}",
             state.config.water_glasses_today, state.config.water_daily_goal
         );
         self.draw_text(
             &water_str,
-            &self.font_medium_11,
+            &self.font_mono_11,
             D2D_RECT_F {
                 left,
-                top: bottom - 28.0,
+                top: bottom - 24.0,
                 right: left + 125.0,
-                bottom: bottom - 2.0,
+                bottom,
             },
             color(secondary.0, secondary.1, secondary.2, alpha),
             DWRITE_TEXT_ALIGNMENT_LEADING,
@@ -1387,12 +1296,12 @@ impl D2DRenderer {
 
         let add_w_rect = D2D_RECT_F {
             left: left + 128.0,
-            top: bottom - 27.0,
+            top: bottom - 24.0,
             right: mid_x,
-            bottom: bottom - 3.0,
+            bottom,
         };
         let hov_w = state.hovered_control == Some(InteractiveControl::WaterAddGlass);
-        self.draw_pill_button(add_w_rect, "+1 Cup", false, hov_w, alpha, accent);
+        self.draw_action_chip(add_w_rect, "+1 UNIT", false, hov_w, alpha, accent);
         state.hit_zones.push(HitZone {
             left: add_w_rect.left,
             top: add_w_rect.top,
@@ -1401,37 +1310,36 @@ impl D2DRenderer {
             control: InteractiveControl::WaterAddGlass,
         });
 
-        // Right Panel: Interactive To-Do Checklist
-        let rx = mid_x + 16.0;
+        let rx = mid_x + 14.0;
         self.draw_text(
-            "✓ Quick Tasks (Click to Toggle)",
-            &self.font_semibold_12,
+            "TASKS",
+            &self.font_mono_11,
             D2D_RECT_F {
                 left: rx,
                 top,
                 right,
-                bottom: top + 20.0,
+                bottom: top + 18.0,
             },
-            color(1.0, 1.0, 1.0, alpha),
+            color(secondary.0, secondary.1, secondary.2, alpha),
             DWRITE_TEXT_ALIGNMENT_LEADING,
         );
 
         for (idx, todo) in state.config.todos.iter().take(3).enumerate() {
-            let ty = top + 24.0 + (idx as f32) * 29.0;
+            let ty = top + 22.0 + (idx as f32) * 28.0;
             let row_rect = D2D_RECT_F {
                 left: rx,
                 top: ty,
                 right,
-                bottom: ty + 25.0,
+                bottom: ty + 24.0,
             };
             let ctrl = InteractiveControl::TodoToggle(idx);
             let hov = state.hovered_control == Some(ctrl);
             let label = if todo.done {
-                format!("☑ {}", todo.text)
+                format!("[X] {}", todo.text)
             } else {
-                format!("☐ {}", todo.text)
+                format!("[ ] {}", todo.text)
             };
-            self.draw_pill_button(row_rect, &label, todo.done, hov, alpha, accent);
+            self.draw_action_chip(row_rect, &label, todo.done, hov, alpha, accent);
             state.hit_zones.push(HitZone {
                 left: row_rect.left,
                 top: row_rect.top,
@@ -1452,32 +1360,31 @@ impl D2DRenderer {
         alpha: f32,
         accent: (f32, f32, f32),
     ) {
-        // Row 1: Style Mode, Spring Physics Preset, Accent Theme
         let style_lbl = match state.config.style {
-            IslandStyle::HybridMorph => "Mode: Hybrid Morph",
-            IslandStyle::AlwaysNotch => "Mode: Always Notch",
-            IslandStyle::AlwaysFloatingPill => "Mode: Floating Pill",
+            IslandStyle::HybridMorph => "GEOMETRY: HYBRID",
+            IslandStyle::AlwaysNotch => "GEOMETRY: NOTCH",
+            IslandStyle::AlwaysFloatingPill => "GEOMETRY: PILL",
         };
-        let spring_lbl = format!("Spring: {}", state.config.spring_preset.label());
-        let theme_lbl = format!("Theme: {}", state.config.accent_theme.label());
+        let spring_lbl = format!("SPRING: {}", state.config.spring_preset.label().to_uppercase());
+        let theme_lbl = format!("ACCENT: {}", state.config.accent_theme.label().to_uppercase());
 
         let top_btns = [
             (
                 InteractiveControl::CustomizeStyleCycle,
                 style_lbl,
                 left,
-                left + 136.0,
+                left + 132.0,
             ),
             (
                 InteractiveControl::CustomizeSpringCycle,
                 &spring_lbl,
-                left + 142.0,
-                left + 272.0,
+                left + 138.0,
+                left + 266.0,
             ),
             (
                 InteractiveControl::CustomizeThemeCycle,
                 &theme_lbl,
-                left + 278.0,
+                left + 272.0,
                 right,
             ),
         ];
@@ -1485,12 +1392,12 @@ impl D2DRenderer {
         for (ctrl, text, x1, x2) in top_btns {
             let r = D2D_RECT_F {
                 left: x1,
-                top: top + 2.0,
+                top,
                 right: x2,
-                bottom: top + 30.0,
+                bottom: top + 24.0,
             };
             let hov = state.hovered_control == Some(ctrl);
-            self.draw_pill_button(r, text, true, hov, alpha, accent);
+            self.draw_action_chip(r, text, false, hov, alpha, accent);
             state.hit_zones.push(HitZone {
                 left: r.left,
                 top: r.top,
@@ -1500,77 +1407,76 @@ impl D2DRenderer {
             });
         }
 
-        // Row 2 & Row 3: Live Geometry Sliders (- / + steppers)
         let adjusters = [
             (
-                format!("Compact Width: {:.0}px", state.config.compact_width),
+                format!("WIDTH   {:.0}PX", state.config.compact_width),
                 InteractiveControl::CustomizeWidthMinus,
                 InteractiveControl::CustomizeWidthPlus,
                 left,
-                top + 40.0,
+                top + 36.0,
             ),
             (
-                format!("Corner Radius: {:.0}px", state.config.corner_radius),
+                format!("RADIUS  {:.0}PX", state.config.corner_radius),
                 InteractiveControl::CustomizeRadiusMinus,
                 InteractiveControl::CustomizeRadiusPlus,
-                left + 210.0,
-                top + 40.0,
+                left + 206.0,
+                top + 36.0,
             ),
             (
-                format!("Notch Ear Flare: {:.0}px", state.config.ear_flare_radius),
+                format!("FLARE   {:.0}PX", state.config.ear_flare_radius),
                 InteractiveControl::CustomizeFlareMinus,
                 InteractiveControl::CustomizeFlarePlus,
                 left,
-                top + 76.0,
+                top + 70.0,
             ),
             (
                 format!(
-                    "Border Glow: {:.0}%",
+                    "BORDER  {:.0}%",
                     state.config.border_glow_opacity * 100.0
                 ),
                 InteractiveControl::CustomizeGlowMinus,
                 InteractiveControl::CustomizeGlowPlus,
-                left + 210.0,
-                top + 76.0,
+                left + 206.0,
+                top + 70.0,
             ),
         ];
 
         for (title, minus_ctrl, plus_ctrl, bx, by) in adjusters {
             self.draw_text(
                 &title,
-                &self.font_medium_11,
+                &self.font_mono_11,
                 D2D_RECT_F {
                     left: bx,
                     top: by,
-                    right: bx + 132.0,
-                    bottom: by + 26.0,
+                    right: bx + 126.0,
+                    bottom: by + 24.0,
                 },
-                color(0.92, 0.94, 0.98, alpha),
+                color(0.84, 0.84, 0.88, alpha),
                 DWRITE_TEXT_ALIGNMENT_LEADING,
             );
 
             let m_rect = D2D_RECT_F {
-                left: bx + 134.0,
+                left: bx + 130.0,
                 top: by,
-                right: bx + 162.0,
-                bottom: by + 26.0,
+                right: bx + 158.0,
+                bottom: by + 24.0,
             };
             let p_rect = D2D_RECT_F {
-                left: bx + 166.0,
+                left: bx + 162.0,
                 top: by,
-                right: bx + 194.0,
-                bottom: by + 26.0,
+                right: bx + 190.0,
+                bottom: by + 24.0,
             };
 
-            self.draw_pill_button(
+            self.draw_action_chip(
                 m_rect,
-                "−",
+                "-",
                 false,
                 state.hovered_control == Some(minus_ctrl),
                 alpha,
                 accent,
             );
-            self.draw_pill_button(
+            self.draw_action_chip(
                 p_rect,
                 "+",
                 false,
@@ -1596,7 +1502,7 @@ impl D2DRenderer {
         }
     }
 
-    unsafe fn draw_pill_button(
+    unsafe fn draw_action_chip(
         &self,
         rect: D2D_RECT_F,
         text: &str,
@@ -1606,19 +1512,14 @@ impl D2DRenderer {
         accent: (f32, f32, f32),
     ) {
         let bg_color = if active {
-            color(
-                accent.0 * 0.28,
-                accent.1 * 0.28,
-                accent.2 * 0.28,
-                (if hovered { 0.95 } else { 0.85 }) * alpha,
-            )
+            color(1.0, 1.0, 1.0, (if hovered { 0.16 } else { 0.12 }) * alpha)
         } else if hovered {
-            color(0.24, 0.25, 0.29, 0.92 * alpha)
+            color(1.0, 1.0, 1.0, 0.08 * alpha)
         } else {
-            color(0.14, 0.15, 0.18, 0.82 * alpha)
+            color(1.0, 1.0, 1.0, 0.03 * alpha)
         };
 
-        let r = ((rect.bottom - rect.top) * 0.5).min(13.0);
+        let r = 5.0;
         if let Ok(b) = self.dc_target.CreateSolidColorBrush(&bg_color, None) {
             self.dc_target.FillRoundedRectangle(
                 &D2D1_ROUNDED_RECT {
@@ -1631,9 +1532,11 @@ impl D2DRenderer {
         }
 
         let border_c = if active {
-            color(accent.0, accent.1, accent.2, 0.70 * alpha)
+            color(accent.0, accent.1, accent.2, 0.55 * alpha)
+        } else if hovered {
+            color(1.0, 1.0, 1.0, 0.18 * alpha)
         } else {
-            color(1.0, 1.0, 1.0, 0.14 * alpha)
+            color(1.0, 1.0, 1.0, 0.07 * alpha)
         };
         if let Ok(sb) = self.dc_target.CreateSolidColorBrush(&border_c, None) {
             self.dc_target.DrawRoundedRectangle(
@@ -1649,13 +1552,13 @@ impl D2DRenderer {
         }
 
         let txt_c = if active {
-            color(1.0, 1.0, 1.0, alpha)
+            color(0.98, 0.98, 0.99, alpha)
         } else {
-            color(0.88, 0.89, 0.93, alpha)
+            color(0.74, 0.74, 0.78, alpha)
         };
         self.draw_text(
             text,
-            &self.font_medium_11,
+            &self.font_semibold_11,
             rect,
             txt_c,
             DWRITE_TEXT_ALIGNMENT_CENTER,
@@ -1678,7 +1581,7 @@ impl D2DRenderer {
                 format,
                 &rect,
                 &brush,
-                windows::Win32::Graphics::Direct2D::D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
+                windows::Win32::Graphics::Direct2D::D2D1_DRAW_TEXT_OPTIONS_NONE,
                 Default::default(),
             );
         }
@@ -1694,4 +1597,3 @@ impl Drop for D2DRenderer {
         }
     }
 }
-

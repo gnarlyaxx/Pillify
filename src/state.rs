@@ -1,6 +1,3 @@
-// Pillify — Reactive Application State & Hit-Test Action Mapping
-// Drives the 4 interactive dashboard tabs, compact status bar, Pomodoro timer, Water tracker, and Notch Customizer.
-
 use crate::config::{IslandStyle, PillifyConfig};
 use crate::spring::IslandAnimator;
 use std::path::Path;
@@ -94,7 +91,7 @@ pub enum InteractiveControl {
     ShelfClearAll,
     PomodoroToggle,
     PomodoroReset,
-    PomodoroPreset(u32), // minutes: 25, 5, 15
+    PomodoroPreset(u32),
     WaterAddGlass,
     WaterReset,
     TodoToggle(usize),
@@ -136,20 +133,17 @@ pub struct AppState {
     pub visible: bool,
     pub suppressed_by_fullscreen: bool,
 
-    // Cursor & interaction tracking
     pub is_hovered: bool,
     pub cursor_pos: (f32, f32),
     pub hovered_control: Option<InteractiveControl>,
     pub hit_zones: Vec<HitZone>,
 
-    // Clock & System Telemetry
     pub current_time_str: String,
     pub battery_percent: u32,
     pub is_charging: bool,
     pub network_connected: bool,
     pub wifi_ssid: String,
 
-    // Audio, SMTC Media & Synced Lyrics / Spectrum
     pub song_title: String,
     pub artist_name: String,
     pub is_playing: bool,
@@ -160,20 +154,15 @@ pub struct AppState {
     pub synced_lyric_line: String,
     pub marquee_offset: f32,
 
-    // Volume OSD overlay timer
     pub last_volume_change: Option<Instant>,
 
-    // Notification / Alert banner
     pub toast_app: String,
     pub toast_title: String,
     pub toast_body: String,
     pub toast_expires_at: Option<Instant>,
 
-    // File Shelf
     pub shelf_items: Vec<ShelfEntry>,
-    pub is_drag_hovering: bool,
 
-    // Pomodoro & Water Reminder
     pub timer_total_secs: u32,
     pub timer_remaining_secs: u32,
     pub timer_running: bool,
@@ -225,7 +214,7 @@ impl AppState {
             is_muted: false,
             audio_spectrum: [0.25, 0.55, 0.85, 0.45, 0.70, 0.35],
             spectrum_phase: 0.0,
-            synced_lyric_line: "♪ Pillify Interactive Audio Ready".to_string(),
+            synced_lyric_line: "SMTC Audio Output Ready".to_string(),
             marquee_offset: 0.0,
             last_volume_change: None,
             toast_app: String::new(),
@@ -233,11 +222,10 @@ impl AppState {
             toast_body: String::new(),
             toast_expires_at: None,
             shelf_items,
-            is_drag_hovering: false,
             timer_total_secs: 25 * 60,
             timer_remaining_secs: 25 * 60,
             timer_running: false,
-            timer_mode_label: "Focus 25m".to_string(),
+            timer_mode_label: "FOCUS 25M".to_string(),
             last_timer_tick: Instant::now(),
             last_water_reminder: Instant::now(),
         }
@@ -247,18 +235,17 @@ impl AppState {
         self.is_playing && !self.song_title.is_empty()
     }
 
-    /// Recomputes spring targets whenever state, hover, media playback, or customization changes.
     pub fn sync_spring_targets(&mut self) {
         let (stiff, damp) = self.config.spring_preset.params();
         self.animator.set_physics_preset(stiff, damp);
 
         let hover_bonus_w = if self.is_hovered && self.mode != DisplayMode::Expanded {
-            14.0
+            12.0
         } else {
             0.0
         };
         let hover_bonus_h = if self.is_hovered && self.mode != DisplayMode::Expanded {
-            3.0
+            2.0
         } else {
             0.0
         };
@@ -267,9 +254,9 @@ impl AppState {
             DisplayMode::Default => {
                 let mut target_w = self.config.compact_width;
                 if self.is_music_active() {
-                    target_w = (target_w + 125.0).max(360.0);
+                    target_w = (target_w + 120.0).max(348.0);
                 } else if self.timer_running {
-                    target_w = (target_w + 68.0).max(296.0);
+                    target_w = (target_w + 64.0).max(288.0);
                 }
                 self.animator.width.set_target(target_w + hover_bonus_w);
                 self.animator
@@ -293,7 +280,7 @@ impl AppState {
                 self.animator.compact_alert_blend.set_target(0.0);
             }
             DisplayMode::NotificationCompact => {
-                self.animator.width.set_target(360.0 + hover_bonus_w);
+                self.animator.width.set_target(348.0 + hover_bonus_w);
                 self.animator
                     .height
                     .set_target((self.config.compact_height + 6.0) + hover_bonus_h);
@@ -327,7 +314,7 @@ impl AppState {
                 }
                 self.animator
                     .corner_radius
-                    .set_target((self.config.corner_radius + 4.0).min(28.0));
+                    .set_target((self.config.corner_radius + 4.0).min(26.0));
                 self.animator.expand_progress.set_target(1.0);
                 self.animator.compact_alert_blend.set_target(0.0);
             }
@@ -335,7 +322,7 @@ impl AppState {
 
         self.animator
             .hover_scale
-            .set_target(if self.is_hovered { 1.02 } else { 1.0 });
+            .set_target(if self.is_hovered { 1.015 } else { 1.0 });
         self.animator
             .page_scroll
             .set_target(self.page.index() as f32);
@@ -359,7 +346,7 @@ impl AppState {
             app.to_string()
         };
         self.toast_title = if title.trim().is_empty() {
-            "Notification".to_string()
+            "Alert".to_string()
         } else {
             title.to_string()
         };
@@ -381,7 +368,7 @@ impl AppState {
             if !self
                 .shelf_items
                 .iter()
-                .any(|item| item.full_path.eq_ignore_ascii_case(trimmed))
+                .any(|entry| entry.full_path.eq_ignore_ascii_case(trimmed))
             {
                 self.shelf_items.insert(0, ShelfEntry::from_path(trimmed));
             }
@@ -390,7 +377,7 @@ impl AppState {
         self.config.shelf_files = self
             .shelf_items
             .iter()
-            .map(|i| i.full_path.clone())
+            .map(|entry| entry.full_path.clone())
             .collect();
         self.config.save();
 
@@ -428,12 +415,11 @@ impl AppState {
     pub fn tick_periodic(&mut self, dt: f32) -> bool {
         let mut needs_redraw = false;
 
-        // Advance audio visualizer & marquee only when playing music
         if self.is_music_active() {
             self.spectrum_phase += dt * 7.5;
-            for (i, bar) in self.audio_spectrum.iter_mut().enumerate() {
-                let wave = ((self.spectrum_phase + (i as f32) * 1.15).sin() * 0.5 + 0.5)
-                    * ((self.spectrum_phase * 0.65 + (i as f32) * 0.7).cos().abs());
+            for (idx, bar) in self.audio_spectrum.iter_mut().enumerate() {
+                let wave = ((self.spectrum_phase + (idx as f32) * 1.15).sin() * 0.5 + 0.5)
+                    * ((self.spectrum_phase * 0.65 + (idx as f32) * 0.7).cos().abs());
                 *bar = (0.18 + wave * 0.82).clamp(0.15, 1.0);
             }
             self.marquee_offset += dt * 34.0;
@@ -443,7 +429,6 @@ impl AppState {
             needs_redraw = true;
         }
 
-        // Check toast auto-dismiss
         if let Some(expiry) = self.toast_expires_at {
             if Instant::now() >= expiry {
                 self.toast_expires_at = None;
@@ -455,7 +440,6 @@ impl AppState {
             }
         }
 
-        // Check Volume OSD expiry
         if let Some(vol_time) = self.last_volume_change {
             if vol_time.elapsed() >= Duration::from_millis(1650) {
                 self.last_volume_change = None;
@@ -464,7 +448,6 @@ impl AppState {
             }
         }
 
-        // Check Pomodoro 1-second countdown
         if self.timer_running && self.last_timer_tick.elapsed() >= Duration::from_secs(1) {
             self.last_timer_tick = Instant::now();
             if self.timer_remaining_secs > 0 {
@@ -473,24 +456,23 @@ impl AppState {
                 if self.timer_remaining_secs == 0 {
                     self.timer_running = false;
                     self.trigger_notification(
-                        "Pillify Focus",
-                        "Session Complete! 🎯",
-                        "Great focus block! Take a short break & hydrate.",
+                        "Focus",
+                        "Session Complete",
+                        "Focus interval finished.",
                     );
                 }
             }
         }
 
-        // Check Water Reminder interval
         let reminder_secs = (self.config.water_reminder_minutes.max(15) as u64) * 60;
         if self.last_water_reminder.elapsed() >= Duration::from_secs(reminder_secs) {
             self.last_water_reminder = Instant::now();
             if self.config.water_glasses_today < self.config.water_daily_goal {
                 self.trigger_notification(
                     "Hydration",
-                    "Time to Drink Water 💧",
+                    "Water Intake Reminder",
                     &format!(
-                        "Progress: {}/{} glasses today.",
+                        "{}/{} units recorded today.",
                         self.config.water_glasses_today, self.config.water_daily_goal
                     ),
                 );
@@ -501,4 +483,3 @@ impl AppState {
         needs_redraw
     }
 }
-

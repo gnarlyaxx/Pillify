@@ -158,9 +158,9 @@ impl AppContext {
                 self.state.timer_total_secs = mins * 60;
                 self.state.timer_remaining_secs = mins * 60;
                 self.state.timer_mode_label = match mins {
-                    5 => "Short Break 5m".to_string(),
-                    15 => "Long Break 15m".to_string(),
-                    _ => "Focus 25m".to_string(),
+                    5 => "SHORT BREAK 05M".to_string(),
+                    15 => "LONG BREAK 15M".to_string(),
+                    _ => "FOCUS 25M".to_string(),
                 };
             }
             InteractiveControl::WaterAddGlass => {
@@ -650,9 +650,9 @@ unsafe extern "system" fn wnd_proc(
                             if let Some(ctx) = borrow.as_mut() {
                                 ctx.state.visible = true;
                                 ctx.state.trigger_notification(
-                                    "Pillify",
-                                    "Interactive Notch Ready ✨",
-                                    "Click the island to morph open, scroll to switch tabs!",
+                                    "System",
+                                    "Notification Test",
+                                    "Capsule morph alert verified.",
                                 );
                                 ctx.ensure_physics_timer();
                                 ctx.render();

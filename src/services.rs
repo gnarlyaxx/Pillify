@@ -226,11 +226,11 @@ impl SystemServices {
             state.artist_name = artist;
             if track_changed {
                 state.synced_lyric_line = if state.song_title.is_empty() {
-                    "♪ Play music on Spotify, YouTube, or Apple Music".to_string()
+                    "SMTC Audio Output Ready".to_string()
                 } else if state.artist_name.is_empty() {
-                    format!("♪ Now Playing: {}", state.song_title)
+                    format!("ACTIVE // {}", state.song_title)
                 } else {
-                    format!("♪ {} — {}", state.song_title, state.artist_name)
+                    format!("{} — {}", state.song_title, state.artist_name)
                 };
             }
             state.sync_spring_targets();
