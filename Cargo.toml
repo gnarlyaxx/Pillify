@@ -1,9 +1,9 @@
 [package]
 name = "pillify"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 authors = ["Pillify Contributors"]
-description = "Pillify — Ultra-lightweight NUSA-style interactive Dynamic Island & Custom Notch for Windows 10/11 powered by Rust & Direct2D GPU Composition."
+description = "Native Windows 10/11 interactive notch and dynamic capsule powered by Rust and Direct2D."
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -17,6 +17,7 @@ windows = { version = "0.58", features = [
     "Storage_Streams",
     "UI_Notifications",
     "UI_Notifications_Management",
+    "Web_Http",
     "Win32_Foundation",
     "Win32_Graphics_Direct2D",
     "Win32_Graphics_Direct2D_Common",
@@ -30,6 +31,7 @@ windows = { version = "0.58", features = [
     "Win32_Graphics_Gdi",
     "Win32_Media_Audio",
     "Win32_Media_Audio_Endpoints",
+    "Win32_Storage_FileSystem",
     "Win32_System_Com",
     "Win32_System_LibraryLoader",
     "Win32_System_Ole",
@@ -48,4 +50,3 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
-

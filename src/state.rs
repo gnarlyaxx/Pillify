@@ -1,9 +1,7 @@
-// Pillify — Reactive Application State & Hit-Test Action Mapping
-// Drives the 4 interactive dashboard tabs, compact status bar, Pomodoro timer, Water tracker, and Notch Customizer.
-
 use crate::config::{IslandStyle, PillifyConfig};
 use crate::spring::IslandAnimator;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,13 +9,6 @@ pub enum DisplayMode {
     Default,
     NotificationCompact,
     Expanded,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FocusMode {
-    None,
-    Gaming,
-    Movie,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,38 +35,154 @@ impl ActivePage {
 }
 
 #[derive(Debug, Clone)]
+pub struct LyricLine {
+    pub timestamp_secs: f32,
+    pub text: String,
+}
+
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct ShelfEntry {
     pub full_path: String,
     pub display_name: String,
     pub extension_badge: String,
     pub is_dir: bool,
+    pub icon_bgra: Option<Vec<u8>>,
+    pub icon_size: u32,
 }
 
 impl ShelfEntry {
     pub fn from_path(raw_path: &str) -> Self {
         let path = Path::new(raw_path);
         let is_dir = path.is_dir();
-        let display_name = path
+
+        // Strip `.lnk` or `.url` from shortcut display names so "VALORANT.lnk" shows cleanly as "VALORANT"
+        let raw_name = path
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or(raw_path)
-            .to_string();
-        let extension_badge = if is_dir {
-            "DIR".to_string()
+            .unwrap_or(raw_path);
+        let display_name = if raw_name.to_ascii_lowercase().ends_with(".lnk")
+            || raw_name.to_ascii_lowercase().ends_with(".url")
+        {
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(raw_name)
+                .to_string()
         } else {
-            path.extension()
-                .and_then(|e| e.to_str())
-                .map(|s| s.to_uppercase())
-                .unwrap_or_else(|| "FILE".to_string())
+            raw_name.to_string()
         };
+
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_uppercase())
+            .unwrap_or_else(|| "FILE".to_string());
+
+        let extension_badge = if is_dir {
+            "Folder".to_string()
+        } else if ext == "LNK" || ext == "EXE" || ext == "URL" {
+            "Application".to_string()
+        } else {
+            ext
+        };
+
+        let icon_bgra = extract_file_icon_bgra(raw_path);
 
         Self {
             full_path: raw_path.to_string(),
             display_name,
             extension_badge,
             is_dir,
+            icon_bgra,
+            icon_size: 32,
         }
+    }
+}
+
+/// Extracts a 32x32 32-bit premultiplied BGRA pixel buffer from any file, folder, or `.lnk` shortcut via Win32 Shell/GDI.
+fn extract_file_icon_bgra(path_str: &str) -> Option<Vec<u8>> {
+    use std::mem::size_of;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Gdi::{
+        CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC,
+        SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+    };
+    use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON};
+    use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, DrawIconEx, DI_NORMAL};
+
+    unsafe {
+        let mut wide: Vec<u16> = path_str.encode_utf16().collect();
+        wide.push(0);
+
+        let mut shfi = SHFILEINFOW::default();
+        let res = SHGetFileInfoW(
+            PCWSTR(wide.as_ptr()),
+            windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0),
+            Some(&mut shfi),
+            size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICON | SHGFI_LARGEICON,
+        );
+
+        if res == 0 || shfi.hIcon.is_invalid() {
+            return None;
+        }
+
+        let icon_w = 32i32;
+        let icon_h = 32i32;
+        let screen_dc = GetDC(HWND::default());
+        let mem_dc = CreateCompatibleDC(screen_dc);
+        ReleaseDC(HWND::default(), screen_dc);
+
+        let bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: icon_w,
+                biHeight: -icon_h, // top-down DIB
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+        let Ok(dib) = CreateDIBSection(mem_dc, &bmi, DIB_RGB_COLORS, &mut bits, None, 0) else {
+            let _ = DestroyIcon(shfi.hIcon);
+            let _ = DeleteDC(mem_dc);
+            return None;
+        };
+
+        let old = SelectObject(mem_dc, dib);
+        let _ = DrawIconEx(mem_dc, 0, 0, shfi.hIcon, icon_w, icon_h, 0, None, DI_NORMAL);
+
+        let byte_len = (icon_w * icon_h * 4) as usize;
+        let mut pixels = vec![0u8; byte_len];
+        if !bits.is_null() {
+            std::ptr::copy_nonoverlapping(bits as *const u8, pixels.as_mut_ptr(), byte_len);
+        }
+
+        // Convert straight alpha to premultiplied alpha for Direct2D compatibility
+        for chunk in pixels.chunks_exact_mut(4) {
+            let a = chunk[3] as u32;
+            if a == 0 {
+                chunk[0] = 0;
+                chunk[1] = 0;
+                chunk[2] = 0;
+            } else if a < 255 {
+                chunk[0] = ((chunk[0] as u32 * a) / 255) as u8;
+                chunk[1] = ((chunk[1] as u32 * a) / 255) as u8;
+                chunk[2] = ((chunk[2] as u32 * a) / 255) as u8;
+            }
+        }
+
+        let _ = SelectObject(mem_dc, old);
+        let _ = DeleteObject(dib);
+        let _ = DeleteDC(mem_dc);
+        let _ = DestroyIcon(shfi.hIcon);
+
+        Some(pixels)
     }
 }
 
@@ -88,13 +195,13 @@ pub enum InteractiveControl {
     MediaPrev,
     MediaPlayPause,
     MediaNext,
-    FocusChip(FocusMode),
+    FocusModeToggle,
     ShelfOpenItem(usize),
     ShelfRemoveItem(usize),
     ShelfClearAll,
     PomodoroToggle,
     PomodoroReset,
-    PomodoroPreset(u32), // minutes: 25, 5, 15
+    PomodoroPreset(u32),
     WaterAddGlass,
     WaterReset,
     TodoToggle(usize),
@@ -127,53 +234,58 @@ impl HitZone {
     }
 }
 
+pub struct SharedLyricsBuffer {
+    pub track_key: String,
+    pub lines: Vec<LyricLine>,
+    pub plain_fallback: String,
+    pub loading: bool,
+}
+
 pub struct AppState {
     pub config: PillifyConfig,
     pub animator: IslandAnimator,
     pub mode: DisplayMode,
-    pub focus_mode: FocusMode,
+    pub focus_mode_enabled: bool,
     pub page: ActivePage,
     pub visible: bool,
     pub suppressed_by_fullscreen: bool,
 
-    // Cursor & interaction tracking
     pub is_hovered: bool,
     pub cursor_pos: (f32, f32),
     pub hovered_control: Option<InteractiveControl>,
     pub hit_zones: Vec<HitZone>,
 
-    // Clock & System Telemetry
     pub current_time_str: String,
     pub battery_percent: u32,
     pub is_charging: bool,
     pub network_connected: bool,
     pub wifi_ssid: String,
 
-    // Audio, SMTC Media & Synced Lyrics / Spectrum
     pub song_title: String,
     pub artist_name: String,
     pub is_playing: bool,
+    pub playback_position_secs: f32,
+    pub playback_duration_secs: f32,
     pub volume_percent: u32,
     pub is_muted: bool,
     pub audio_spectrum: [f32; 6],
     pub spectrum_phase: f32,
+    pub active_lyric_index: usize,
+    pub lyric_lines_snapshot: Vec<String>,
     pub synced_lyric_line: String,
+    pub next_lyric_line: String,
+    pub shared_lyrics: Arc<Mutex<SharedLyricsBuffer>>,
     pub marquee_offset: f32,
 
-    // Volume OSD overlay timer
     pub last_volume_change: Option<Instant>,
 
-    // Notification / Alert banner
     pub toast_app: String,
     pub toast_title: String,
     pub toast_body: String,
     pub toast_expires_at: Option<Instant>,
 
-    // File Shelf
     pub shelf_items: Vec<ShelfEntry>,
-    pub is_drag_hovering: bool,
 
-    // Pomodoro & Water Reminder
     pub timer_total_secs: u32,
     pub timer_remaining_secs: u32,
     pub timer_running: bool,
@@ -205,7 +317,7 @@ impl AppState {
             config,
             animator,
             mode: DisplayMode::Default,
-            focus_mode: FocusMode::None,
+            focus_mode_enabled: false,
             page: ActivePage::Media,
             visible: true,
             suppressed_by_fullscreen: false,
@@ -221,11 +333,22 @@ impl AppState {
             song_title: String::new(),
             artist_name: String::new(),
             is_playing: false,
+            playback_position_secs: 0.0,
+            playback_duration_secs: 210.0,
             volume_percent: 65,
             is_muted: false,
             audio_spectrum: [0.25, 0.55, 0.85, 0.45, 0.70, 0.35],
             spectrum_phase: 0.0,
-            synced_lyric_line: "♪ Pillify Interactive Audio Ready".to_string(),
+            active_lyric_index: 0,
+            lyric_lines_snapshot: Vec::new(),
+            synced_lyric_line: "Play any song to view live synced lyrics".to_string(),
+            next_lyric_line: String::new(),
+            shared_lyrics: Arc::new(Mutex::new(SharedLyricsBuffer {
+                track_key: String::new(),
+                lines: Vec::new(),
+                plain_fallback: String::new(),
+                loading: false,
+            })),
             marquee_offset: 0.0,
             last_volume_change: None,
             toast_app: String::new(),
@@ -233,11 +356,10 @@ impl AppState {
             toast_body: String::new(),
             toast_expires_at: None,
             shelf_items,
-            is_drag_hovering: false,
             timer_total_secs: 25 * 60,
             timer_remaining_secs: 25 * 60,
             timer_running: false,
-            timer_mode_label: "Focus 25m".to_string(),
+            timer_mode_label: "Focus Session".to_string(),
             last_timer_tick: Instant::now(),
             last_water_reminder: Instant::now(),
         }
@@ -247,18 +369,17 @@ impl AppState {
         self.is_playing && !self.song_title.is_empty()
     }
 
-    /// Recomputes spring targets whenever state, hover, media playback, or customization changes.
     pub fn sync_spring_targets(&mut self) {
         let (stiff, damp) = self.config.spring_preset.params();
         self.animator.set_physics_preset(stiff, damp);
 
         let hover_bonus_w = if self.is_hovered && self.mode != DisplayMode::Expanded {
-            14.0
+            12.0
         } else {
             0.0
         };
         let hover_bonus_h = if self.is_hovered && self.mode != DisplayMode::Expanded {
-            3.0
+            2.0
         } else {
             0.0
         };
@@ -266,10 +387,10 @@ impl AppState {
         match self.mode {
             DisplayMode::Default => {
                 let mut target_w = self.config.compact_width;
-                if self.is_music_active() {
-                    target_w = (target_w + 125.0).max(360.0);
-                } else if self.timer_running {
-                    target_w = (target_w + 68.0).max(296.0);
+                if self.is_music_active() && !self.focus_mode_enabled {
+                    target_w = (target_w + 125.0).max(352.0);
+                } else if self.timer_running || self.focus_mode_enabled {
+                    target_w = (target_w + 70.0).max(292.0);
                 }
                 self.animator.width.set_target(target_w + hover_bonus_w);
                 self.animator
@@ -293,7 +414,7 @@ impl AppState {
                 self.animator.compact_alert_blend.set_target(0.0);
             }
             DisplayMode::NotificationCompact => {
-                self.animator.width.set_target(360.0 + hover_bonus_w);
+                self.animator.width.set_target(356.0 + hover_bonus_w);
                 self.animator
                     .height
                     .set_target((self.config.compact_height + 6.0) + hover_bonus_h);
@@ -335,7 +456,7 @@ impl AppState {
 
         self.animator
             .hover_scale
-            .set_target(if self.is_hovered { 1.02 } else { 1.0 });
+            .set_target(if self.is_hovered { 1.015 } else { 1.0 });
         self.animator
             .page_scroll
             .set_target(self.page.index() as f32);
@@ -349,8 +470,24 @@ impl AppState {
             .set_target(if osd_active { 1.0 } else { 0.0 });
     }
 
+    /// Toggles real Focus Mode: suppresses notifications, starts the 25m focus timer if idle, and shows the Focus indicator.
+    pub fn toggle_focus_mode(&mut self) {
+        self.focus_mode_enabled = !self.focus_mode_enabled;
+        if self.focus_mode_enabled {
+            if !self.timer_running {
+                if self.timer_remaining_secs == 0 {
+                    self.timer_remaining_secs = self.timer_total_secs.max(25 * 60);
+                }
+                self.timer_running = true;
+                self.last_timer_tick = Instant::now();
+            }
+        }
+        self.sync_spring_targets();
+    }
+
     pub fn trigger_notification(&mut self, app: &str, title: &str, body: &str) {
-        if self.focus_mode == FocusMode::Gaming {
+        // Real Focus Mode behavior: suppress all incoming popups & alerts while Focus Mode is ON
+        if self.focus_mode_enabled {
             return;
         }
         self.toast_app = if app.trim().is_empty() {
@@ -359,7 +496,7 @@ impl AppState {
             app.to_string()
         };
         self.toast_title = if title.trim().is_empty() {
-            "Notification".to_string()
+            "Alert".to_string()
         } else {
             title.to_string()
         };
@@ -381,7 +518,7 @@ impl AppState {
             if !self
                 .shelf_items
                 .iter()
-                .any(|item| item.full_path.eq_ignore_ascii_case(trimmed))
+                .any(|entry| entry.full_path.eq_ignore_ascii_case(trimmed))
             {
                 self.shelf_items.insert(0, ShelfEntry::from_path(trimmed));
             }
@@ -390,7 +527,7 @@ impl AppState {
         self.config.shelf_files = self
             .shelf_items
             .iter()
-            .map(|i| i.full_path.clone())
+            .map(|entry| entry.full_path.clone())
             .collect();
         self.config.save();
 
@@ -425,17 +562,73 @@ impl AppState {
         }
     }
 
+    pub fn update_active_lyric_from_timeline(&mut self) {
+        let Ok(guard) = self.shared_lyrics.try_lock() else {
+            return;
+        };
+
+        if guard.loading {
+            self.lyric_lines_snapshot.clear();
+            self.synced_lyric_line = "Fetching synced lyrics...".to_string();
+            self.next_lyric_line.clear();
+            self.animator.lyric_scroll.snap(0.0);
+            return;
+        }
+
+        if !guard.lines.is_empty() {
+            if self.lyric_lines_snapshot.len() != guard.lines.len() {
+                self.lyric_lines_snapshot = guard.lines.iter().map(|l| l.text.clone()).collect();
+            }
+            let pos = self.playback_position_secs;
+            let mut active_idx = 0usize;
+            for (idx, line) in guard.lines.iter().enumerate() {
+                if line.timestamp_secs <= pos + 0.20 {
+                    active_idx = idx;
+                } else {
+                    break;
+                }
+            }
+            // If song jumped/restarted far away (> 4 lines), snap immediately; otherwise animate smoothly via spring!
+            if (active_idx as f32 - self.animator.lyric_scroll.value).abs() > 4.5 {
+                self.animator.lyric_scroll.snap(active_idx as f32);
+            } else {
+                self.animator.lyric_scroll.set_target(active_idx as f32);
+            }
+            self.active_lyric_index = active_idx;
+            self.synced_lyric_line = guard.lines[active_idx].text.clone();
+            self.next_lyric_line = guard
+                .lines
+                .get(active_idx + 1)
+                .map(|l| l.text.clone())
+                .unwrap_or_default();
+        } else if !guard.plain_fallback.is_empty() {
+            self.lyric_lines_snapshot.clear();
+            self.synced_lyric_line = guard.plain_fallback.clone();
+            self.next_lyric_line.clear();
+        } else if !self.song_title.is_empty() {
+            self.lyric_lines_snapshot.clear();
+            self.synced_lyric_line = format!("♪  {} — {}", self.song_title, self.artist_name);
+            self.next_lyric_line.clear();
+        } else {
+            self.lyric_lines_snapshot.clear();
+            self.synced_lyric_line = "Play any song to view live synced lyrics".to_string();
+            self.next_lyric_line.clear();
+        }
+    }
+
     pub fn tick_periodic(&mut self, dt: f32) -> bool {
         let mut needs_redraw = false;
 
-        // Advance audio visualizer & marquee only when playing music
         if self.is_music_active() {
+            self.playback_position_secs =
+                (self.playback_position_secs + dt).min(self.playback_duration_secs.max(10.0));
             self.spectrum_phase += dt * 7.5;
-            for (i, bar) in self.audio_spectrum.iter_mut().enumerate() {
-                let wave = ((self.spectrum_phase + (i as f32) * 1.15).sin() * 0.5 + 0.5)
-                    * ((self.spectrum_phase * 0.65 + (i as f32) * 0.7).cos().abs());
+            for (idx, bar) in self.audio_spectrum.iter_mut().enumerate() {
+                let wave = ((self.spectrum_phase + (idx as f32) * 1.15).sin() * 0.5 + 0.5)
+                    * ((self.spectrum_phase * 0.65 + (idx as f32) * 0.7).cos().abs());
                 *bar = (0.18 + wave * 0.82).clamp(0.15, 1.0);
             }
+            self.update_active_lyric_from_timeline();
             self.marquee_offset += dt * 34.0;
             if self.marquee_offset > 320.0 {
                 self.marquee_offset = -180.0;
@@ -443,7 +636,6 @@ impl AppState {
             needs_redraw = true;
         }
 
-        // Check toast auto-dismiss
         if let Some(expiry) = self.toast_expires_at {
             if Instant::now() >= expiry {
                 self.toast_expires_at = None;
@@ -455,7 +647,6 @@ impl AppState {
             }
         }
 
-        // Check Volume OSD expiry
         if let Some(vol_time) = self.last_volume_change {
             if vol_time.elapsed() >= Duration::from_millis(1650) {
                 self.last_volume_change = None;
@@ -464,7 +655,6 @@ impl AppState {
             }
         }
 
-        // Check Pomodoro 1-second countdown
         if self.timer_running && self.last_timer_tick.elapsed() >= Duration::from_secs(1) {
             self.last_timer_tick = Instant::now();
             if self.timer_remaining_secs > 0 {
@@ -472,25 +662,25 @@ impl AppState {
                 needs_redraw = true;
                 if self.timer_remaining_secs == 0 {
                     self.timer_running = false;
+                    self.focus_mode_enabled = false;
                     self.trigger_notification(
-                        "Pillify Focus",
-                        "Session Complete! 🎯",
-                        "Great focus block! Take a short break & hydrate.",
+                        "Focus",
+                        "Session Complete",
+                        "Focus interval finished.",
                     );
                 }
             }
         }
 
-        // Check Water Reminder interval
         let reminder_secs = (self.config.water_reminder_minutes.max(15) as u64) * 60;
         if self.last_water_reminder.elapsed() >= Duration::from_secs(reminder_secs) {
             self.last_water_reminder = Instant::now();
             if self.config.water_glasses_today < self.config.water_daily_goal {
                 self.trigger_notification(
                     "Hydration",
-                    "Time to Drink Water 💧",
+                    "Water Reminder",
                     &format!(
-                        "Progress: {}/{} glasses today.",
+                        "{}/{} cups recorded today.",
                         self.config.water_glasses_today, self.config.water_daily_goal
                     ),
                 );
@@ -501,4 +691,3 @@ impl AppState {
         needs_redraw
     }
 }
-

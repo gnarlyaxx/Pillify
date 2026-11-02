@@ -1,17 +1,11 @@
-// Pillify — User Configuration & Live Notch Customizer Persistence
-// Stored locally in %LOCALAPPDATA%\Pillify\config.json with strict input sanitization.
-
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IslandStyle {
-    /// Floating iPhone-style capsule with top margin, morphs into Notch on expand
-    HybridMorph,
-    /// Always docked flush to the top bezel with concave MacBook-style flared ears
     AlwaysNotch,
-    /// Always floating rounded pill even when expanded
+    HybridMorph,
     AlwaysFloatingPill,
 }
 
@@ -25,15 +19,15 @@ pub enum SpringPreset {
 impl SpringPreset {
     pub fn params(self) -> (f32, f32) {
         match self {
-            SpringPreset::Bouncy => (265.0, 18.0),
-            SpringPreset::Snappy => (380.0, 27.0),
-            SpringPreset::Smooth => (230.0, 29.0),
+            SpringPreset::Bouncy => (240.0, 17.5),
+            SpringPreset::Snappy => (340.0, 25.0),
+            SpringPreset::Smooth => (210.0, 27.0),
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            SpringPreset::Bouncy => "Bouncy",
+            SpringPreset::Bouncy => "Fluid",
             SpringPreset::Snappy => "Snappy",
             SpringPreset::Smooth => "Smooth",
         }
@@ -50,48 +44,43 @@ impl SpringPreset {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AccentTheme {
-    CyanPulse,
-    EmeraldNusa,
-    SunsetCoral,
-    RoyalViolet,
-    MonochromeWhite,
+    GraphiteWhite,
+    AmberSignal,
+    EmeraldSignal,
+    CobaltSignal,
 }
 
 impl AccentTheme {
-    /// Returns (Primary RGB, Secondary RGB) in normalized 0.0..=1.0
     pub fn colors(self) -> ((f32, f32, f32), (f32, f32, f32)) {
         match self {
-            AccentTheme::CyanPulse => ((0.0, 0.898, 1.0), (0.314, 0.980, 0.482)),
-            AccentTheme::EmeraldNusa => ((0.180, 0.925, 0.580), (0.0, 0.820, 0.950)),
-            AccentTheme::SunsetCoral => ((1.0, 0.450, 0.380), (1.0, 0.750, 0.280)),
-            AccentTheme::RoyalViolet => ((0.680, 0.480, 1.0), (0.0, 0.898, 1.0)),
-            AccentTheme::MonochromeWhite => ((0.96, 0.96, 0.98), (0.72, 0.72, 0.78)),
+            AccentTheme::GraphiteWhite => ((0.98, 0.98, 1.0), (0.62, 0.62, 0.66)),
+            AccentTheme::AmberSignal => ((1.0, 0.62, 0.04), (0.68, 0.68, 0.72)),
+            AccentTheme::EmeraldSignal => ((0.19, 0.82, 0.35), (0.68, 0.68, 0.72)),
+            AccentTheme::CobaltSignal => ((0.04, 0.52, 1.0), (0.68, 0.68, 0.72)),
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            AccentTheme::CyanPulse => "Cyan",
-            AccentTheme::EmeraldNusa => "Nusa Green",
-            AccentTheme::SunsetCoral => "Coral",
-            AccentTheme::RoyalViolet => "Violet",
-            AccentTheme::MonochromeWhite => "Mono",
+            AccentTheme::GraphiteWhite => "White",
+            AccentTheme::AmberSignal => "Amber",
+            AccentTheme::EmeraldSignal => "Green",
+            AccentTheme::CobaltSignal => "Blue",
         }
     }
 
     pub fn next(self) -> Self {
         match self {
-            AccentTheme::CyanPulse => AccentTheme::EmeraldNusa,
-            AccentTheme::EmeraldNusa => AccentTheme::SunsetCoral,
-            AccentTheme::SunsetCoral => AccentTheme::RoyalViolet,
-            AccentTheme::RoyalViolet => AccentTheme::MonochromeWhite,
-            AccentTheme::MonochromeWhite => AccentTheme::CyanPulse,
+            AccentTheme::GraphiteWhite => AccentTheme::CobaltSignal,
+            AccentTheme::CobaltSignal => AccentTheme::EmeraldSignal,
+            AccentTheme::EmeraldSignal => AccentTheme::AmberSignal,
+            AccentTheme::AmberSignal => AccentTheme::GraphiteWhite,
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TodoItem {
+pub struct TodoTask {
     pub text: String,
     pub done: bool,
 }
@@ -113,39 +102,39 @@ pub struct PillifyConfig {
     pub water_glasses_today: u32,
     pub water_daily_goal: u32,
     pub water_reminder_minutes: u32,
-    pub todos: Vec<TodoItem>,
+    pub todos: Vec<TodoTask>,
     pub shelf_files: Vec<String>,
 }
 
 impl Default for PillifyConfig {
     fn default() -> Self {
         Self {
-            style: IslandStyle::HybridMorph,
+            style: IslandStyle::AlwaysNotch,
             spring_preset: SpringPreset::Bouncy,
-            accent_theme: AccentTheme::CyanPulse,
-            compact_width: 236.0,
-            compact_height: 40.0,
-            expanded_width: 450.0,
-            expanded_height: 224.0,
+            accent_theme: AccentTheme::GraphiteWhite,
+            compact_width: 212.0,
+            compact_height: 34.0,
+            expanded_width: 484.0,
+            expanded_height: 244.0,
             top_margin: 8.0,
             ear_flare_radius: 14.0,
-            corner_radius: 20.0,
-            border_glow_opacity: 0.24,
+            corner_radius: 22.0,
+            border_glow_opacity: 0.12,
             auto_hide_fullscreen: true,
             water_glasses_today: 2,
             water_daily_goal: 8,
             water_reminder_minutes: 45,
             todos: vec![
-                TodoItem {
-                    text: "Ship Pillify v2.0 in Rust".to_string(),
+                TodoTask {
+                    text: "Review project layout".to_string(),
                     done: true,
                 },
-                TodoItem {
-                    text: "Customize Notch shape & spring physics".to_string(),
+                TodoTask {
+                    text: "Drop files into Tray".to_string(),
                     done: false,
                 },
-                TodoItem {
-                    text: "Drag & drop files into File Shelf".to_string(),
+                TodoTask {
+                    text: "Start 25m focus session".to_string(),
                     done: false,
                 },
             ],
@@ -155,21 +144,20 @@ impl Default for PillifyConfig {
 }
 
 impl PillifyConfig {
-    /// Validates and clamps all user-modifiable fields so corrupted JSON cannot break rendering.
     pub fn sanitize(&mut self) {
-        self.compact_width = self.compact_width.clamp(180.0, 340.0);
-        self.compact_height = self.compact_height.clamp(32.0, 56.0);
-        self.expanded_width = self.expanded_width.clamp(380.0, 540.0);
-        self.expanded_height = self.expanded_height.clamp(190.0, 270.0);
+        self.compact_width = self.compact_width.clamp(170.0, 340.0);
+        self.compact_height = self.compact_height.clamp(30.0, 52.0);
+        self.expanded_width = self.expanded_width.clamp(420.0, 560.0);
+        self.expanded_height = self.expanded_height.clamp(210.0, 290.0);
         self.top_margin = self.top_margin.clamp(0.0, 24.0);
         self.ear_flare_radius = self.ear_flare_radius.clamp(6.0, 24.0);
         self.corner_radius = self.corner_radius.clamp(12.0, 28.0);
-        self.border_glow_opacity = self.border_glow_opacity.clamp(0.05, 0.70);
+        self.border_glow_opacity = self.border_glow_opacity.clamp(0.05, 0.45);
         self.water_daily_goal = self.water_daily_goal.clamp(4, 16);
         self.water_glasses_today = self.water_glasses_today.min(30);
         self.todos.truncate(12);
-        for item in &mut self.todos {
-            item.text = item.text.trim().chars().take(60).collect();
+        for task in &mut self.todos {
+            task.text = task.text.trim().chars().take(60).collect();
         }
         self.shelf_files.retain(|p| !p.trim().is_empty());
         self.shelf_files.truncate(24);
@@ -220,7 +208,6 @@ mod tests {
         cfg.sanitize();
         assert_eq!(cfg.compact_width, 340.0);
         assert_eq!(cfg.top_margin, 0.0);
-        assert_eq!(cfg.border_glow_opacity, 0.70);
+        assert_eq!(cfg.border_glow_opacity, 0.45);
     }
 }
-

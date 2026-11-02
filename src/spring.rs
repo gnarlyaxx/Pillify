@@ -97,6 +97,7 @@ pub struct IslandAnimator {
     pub compact_alert_blend: Spring, // 0.0 = normal compact, 1.0 = toast alert compact
     pub page_scroll: Spring, // 0.0 = Media, 1.0 = Shelf, 2.0 = Focus/Timer, 3.0 = Customizer
     pub osd_blend: Spring, // 0.0 = hidden, 1.0 = Volume/System OSD active
+    pub lyric_scroll: Spring, // Smooth vertical line index for Spotify-style scrolling lyrics
 }
 
 impl IslandAnimator {
@@ -112,6 +113,7 @@ impl IslandAnimator {
             compact_alert_blend: Spring::snappy(0.0),
             page_scroll: Spring::snappy(0.0),
             osd_blend: Spring::snappy(0.0),
+            lyric_scroll: Spring::new(0.0, 210.0, 26.0),
         }
     }
 
@@ -133,6 +135,7 @@ impl IslandAnimator {
         active |= self.compact_alert_blend.step(dt);
         active |= self.page_scroll.step(dt);
         active |= self.osd_blend.step(dt);
+        active |= self.lyric_scroll.step(dt);
         active
     }
 }

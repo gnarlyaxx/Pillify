@@ -1,27 +1,30 @@
 # Changelog
 
-All notable changes to **Pillify** will be documented in this file.
+All notable changes to **Pillify** are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.1.0] - 2026-11-03
+### Added
+- **Live Synced Lyrics with Smooth Vertical Scroll (`src/services.rs`, `src/spring.rs`, `src/state.rs`, `src/renderer.rs`)**: Automatic LRC timestamped lyrics fetcher via LRCLIB HTTPS API synchronized to Windows SMTC `TimelineProperties` playback position, rendered with `lyric_scroll` spring physics and Direct2D `PushAxisAlignedClip` viewport masking so lyric lines glide upward and fade out smoothly like Spotify.
+- **Native Application & Shortcut Icon Extraction (`src/state.rs`, `src/renderer.rs`)**: Automatically extracts 32x32 32-bit premultiplied BGRA icons from `.lnk` shortcuts, `.exe` binaries, and folders via Win32 `SHGetFileInfoW` + `DrawIconEx` and renders them as Direct2D bitmaps in `Tray`.
+- **Single Focus Mode On/Off Toggle**: Replaced the 3 static mode buttons with a single `Focus Mode: ON / OFF` toggle pill that suppresses incoming notifications, starts the 25-minute focus timer if idle, and displays a compact focus indicator when collapsed.
+
+### Fixed
+- **Expanded Notch Layout & Text Clipping**: Expanded default notch height (`244px`) and width (`484px`) and enforced `D2D1_DRAW_TEXT_OPTIONS_CLIP` + DirectWrite character ellipsis trimming (`...`) so long song titles never overlap transport buttons.
+
+## [v1.0.2] - 2026-11-03
+### Changed
+- **macOS Notch / Dynamic Island Visual Refinement**: Set default geometry to flush top-bezel MacBook Notch (`AlwaysNotch`, `#000000` pitch-black) with fluid `Bouncy` spring physics, full-capsule pill controls (`Now Playing`, `Tray`, `Timer`, `Notch`), and crisp native `Segoe Fluent Icons` media transport glyphs.
+
+## [v1.0.1] - 2026-11-03
+### Changed
+- **Anti-Slop UI & Typography Overhaul**: Replaced all emojis, decorative badges, and neon gradients with a high-contrast matte black (`#09090B`) hardware aesthetic, 1px structural hairlines, and monospace (`Consolas`) + `Segoe UI Variable Text` technical readouts.
+- **Structured Shelf Layout**: Replaced generic card grids in the `SHELF` view with structured file rows (`[EXT] filename` + `DEL`).
+- **Documentation**: Rewrote `README.md` with concise technical documentation and zero decorative emojis.
+
 ## [v1.0.0] - 2026-11-03
 ### Added
-- **Full Rust + Direct2D GPU Rewrite (`Pillify`)**: Complete migration from .NET 10 WPF to native Rust (`windows-rs` + Direct2D + DirectWrite + `UpdateLayeredWindow` premultiplied alpha) with 0% CPU usage when idle.
-- **Real Spring Physics Engine (`src/spring.rs`)**: Damped harmonic oscillator with velocity preservation and 3 user-selectable physics presets (`Bouncy`, `Snappy`, `Smooth`).
-- **True Mathematical Bezier Notch Morphing (`src/renderer.rs`)**: Smooth geometric interpolation between a floating rounded pill and a MacBook/NUSA-style concave top-bezel notch.
-- **Smart Click-Through Hit-Testing (`WM_NCHITTEST`)**: Pixels outside the active capsule/notch return `HTTRANSPARENT` so clicks pass directly through to underlying windows.
-- **4 Interactive Dashboard Pages**:
-  - `🎵 Media`: WinRT SMTC playback controls, animated 6-bar audio equalizer, live lyrics/status banner, and Focus Mode chips (`Normal`, `Gaming`, `Movie`).
-  - `📥 Shelf`: Drag-and-drop file & folder shelf with extension badges and one-click Explorer launch.
-  - `⏱ Focus`: Interactive Pomodoro countdown timer (`25m`, `5m`, `15m`), Daily Water Intake tracker (`+1 Cup` & automatic hydration reminders), and interactive Quick Tasks checklist.
-  - `✨ Notch`: Live in-app Notch Customizer Studio to tweak Island Mode (`Hybrid Morph`, `Always Notch`, `Floating Pill`), Spring Preset, Accent Theme, Compact Width, Corner Radius, Notch Ear Flare, and Border Glow opacity in real time.
-- **Hardware Volume OSD & Auto-Hide Fullscreen**: Automatic volume bar morphing when pressing media volume keys and automatic suppression during fullscreen games (`SHQueryUserNotificationState`).
-- **System Tray Icon & Context Menu**: Quick access to Show/Hide (`Ctrl+Alt+I`), Notch Customizer Studio, Test Notification Morph, and Exit.
-
-### Changed
-- Renamed project directory, package, and application identity from `dynamic_island` to **Pillify**.
-
-### Removed
-- Legacy .NET 10 WPF XAML storyboards, `CommunityToolkit.Mvvm`, and `NAudio` dependencies.
-
+- Initial native Rust + Direct2D implementation of Pillify (`src/spring.rs`, `src/renderer.rs`, `src/state.rs`, `src/services.rs`, `src/config.rs`, `src/main.rs`).
+- Spring-driven Bezier capsule-to-notch morphing, `WM_NCHITTEST` click-through hit-testing, SMTC media integration, file shelf, Pomodoro/hydration tracker, and live geometry customizer.
