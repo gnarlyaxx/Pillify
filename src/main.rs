@@ -30,10 +30,10 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DispatchMessageW,
-    GetCursorPos, GetSystemMetrics, KillTimer, LoadCursorW, LoadIconW, PostQuitMessage,
+    GetCursorPos, GetMessageW, GetSystemMetrics, KillTimer, LoadCursorW, LoadIconW, PostQuitMessage,
     RegisterClassW, SetForegroundWindow, SetTimer, ShowWindow, TrackPopupMenu, TranslateMessage,
-    WaitMessage, CS_HREDRAW, CS_VREDRAW, HTCLIENT, HTTRANSPARENT, IDC_HAND, IDI_APPLICATION,
-    MF_SEPARATOR, MF_STRING, MSG, PM_REMOVE, PeekMessageW, SM_CXSCREEN, SW_SHOWNOACTIVATE,
+    CS_HREDRAW, CS_VREDRAW, HTCLIENT, HTTRANSPARENT, IDC_HAND, IDI_APPLICATION,
+    MF_SEPARATOR, MF_STRING, MSG, SM_CXSCREEN, SW_SHOWNOACTIVATE,
     TPM_BOTTOMALIGN, TPM_LEFTALIGN, WINDOW_EX_STYLE, WM_COMMAND, WM_DESTROY, WM_DROPFILES,
     WM_HOTKEY, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCHITTEST,
     WM_RBUTTONUP, WM_TIMER, WM_USER, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
@@ -329,18 +329,13 @@ fn main() -> windows::core::Result<()> {
 
         // Pure event-driven message loop (sleeps on WaitMessage when idle)
         let mut msg = MSG::default();
-        loop {
-            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
-                if msg.message == windows::Win32::UI::WindowsAndMessaging::WM_QUIT {
-                    remove_tray_icon(hwnd);
-                    let _ = UnregisterHotKey(hwnd, HOTKEY_ID_TOGGLE);
-                    return Ok(());
-                }
-                let _ = TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-            }
-            let _ = WaitMessage();
+        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
         }
+        remove_tray_icon(hwnd);
+        let _ = UnregisterHotKey(hwnd, HOTKEY_ID_TOGGLE);
+        Ok(())
     }
 }
 
@@ -419,24 +414,28 @@ unsafe extern "system" fn wnd_proc(
 ) -> LRESULT {
     match msg {
         WM_NCHITTEST => {
-            // Smart Per-Shape Hit-Testing: Any pixel outside the active Pill/Notch returns HTTRANSPARENT
-            // so mouse clicks pass straight through to underlying apps/browser tabs!
             let screen_x = (lparam.0 & 0xFFFF) as i16 as i32;
             let screen_y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
 
-            let inside = APP_CTX.with(|cell| {
-                if let Some(ctx) = cell.borrow().as_ref() {
-                    if !ctx.state.visible || ctx.state.suppressed_by_fullscreen {
-                        return false;
+            let inside = APP_CTX
+                .try_with(|cell| {
+                    if let Ok(borrow) = cell.try_borrow() {
+                        if let Some(ctx) = borrow.as_ref() {
+                            if !ctx.state.visible || ctx.state.suppressed_by_fullscreen {
+                                return false;
+                            }
+                            let local_x = (screen_x - ctx.window_x) as f32;
+                            let local_y = (screen_y - ctx.window_y) as f32;
+                            let (l, t, r, b) = D2DRenderer::island_bounds(&ctx.state);
+                            return local_x >= l - 6.0
+                                && local_x <= r + 6.0
+                                && local_y >= t
+                                && local_y <= b + 6.0;
+                        }
                     }
-                    let local_x = (screen_x - ctx.window_x) as f32;
-                    let local_y = (screen_y - ctx.window_y) as f32;
-                    let (l, t, r, b) = D2DRenderer::island_bounds(&ctx.state);
-                    local_x >= l - 6.0 && local_x <= r + 6.0 && local_y >= t && local_y <= b + 6.0
-                } else {
                     false
-                }
-            });
+                })
+                .unwrap_or(false);
 
             if inside {
                 LRESULT(HTCLIENT as isize)
@@ -448,53 +447,56 @@ unsafe extern "system" fn wnd_proc(
             let local_x = (lparam.0 & 0xFFFF) as i16 as f32;
             let local_y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
 
-            APP_CTX.with(|cell| {
-                if let Some(ctx) = cell.borrow_mut().as_mut() {
-                    if !ctx.tracking_mouse_leave {
-                        let mut tme = TRACKMOUSEEVENT {
-                            cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
-                            dwFlags: TME_LEAVE,
-                            hwndTrack: hwnd,
-                            dwHoverTime: 0,
-                        };
-                        let _ = TrackMouseEvent(&mut tme);
-                        ctx.tracking_mouse_leave = true;
-                    }
+            let _ = APP_CTX.try_with(|cell| {
+                if let Ok(mut borrow) = cell.try_borrow_mut() {
+                    if let Some(ctx) = borrow.as_mut() {
+                        if !ctx.tracking_mouse_leave {
+                            let mut tme = TRACKMOUSEEVENT {
+                                cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                                dwFlags: TME_LEAVE,
+                                hwndTrack: hwnd,
+                                dwHoverTime: 0,
+                            };
+                            let _ = TrackMouseEvent(&mut tme);
+                            ctx.tracking_mouse_leave = true;
+                        }
 
-                    ctx.state.cursor_pos = (local_x, local_y);
-                    let was_hovered = ctx.state.is_hovered;
-                    ctx.state.is_hovered = true;
+                        ctx.state.cursor_pos = (local_x, local_y);
+                        let was_hovered = ctx.state.is_hovered;
+                        ctx.state.is_hovered = true;
 
-                    // Find the most specific hit zone under the cursor (excluding the fallback IslandBody)
-                    let new_ctrl = ctx
-                        .state
-                        .hit_zones
-                        .iter()
-                        .find(|z| {
-                            z.control != InteractiveControl::IslandBody
-                                && z.contains(local_x, local_y)
-                        })
-                        .map(|z| z.control);
+                        let new_ctrl = ctx
+                            .state
+                            .hit_zones
+                            .iter()
+                            .find(|z| {
+                                z.control != InteractiveControl::IslandBody
+                                    && z.contains(local_x, local_y)
+                            })
+                            .map(|z| z.control);
 
-                    if !was_hovered || ctx.state.hovered_control != new_ctrl {
-                        ctx.state.hovered_control = new_ctrl;
-                        ctx.state.sync_spring_targets();
-                        ctx.ensure_physics_timer();
-                        ctx.render();
+                        if !was_hovered || ctx.state.hovered_control != new_ctrl {
+                            ctx.state.hovered_control = new_ctrl;
+                            ctx.state.sync_spring_targets();
+                            ctx.ensure_physics_timer();
+                            ctx.render();
+                        }
                     }
                 }
             });
             LRESULT(0)
         }
         WM_MOUSELEAVE => {
-            APP_CTX.with(|cell| {
-                if let Some(ctx) = cell.borrow_mut().as_mut() {
-                    ctx.tracking_mouse_leave = false;
-                    ctx.state.is_hovered = false;
-                    ctx.state.hovered_control = None;
-                    ctx.state.sync_spring_targets();
-                    ctx.ensure_physics_timer();
-                    ctx.render();
+            let _ = APP_CTX.try_with(|cell| {
+                if let Ok(mut borrow) = cell.try_borrow_mut() {
+                    if let Some(ctx) = borrow.as_mut() {
+                        ctx.tracking_mouse_leave = false;
+                        ctx.state.is_hovered = false;
+                        ctx.state.hovered_control = None;
+                        ctx.state.sync_spring_targets();
+                        ctx.ensure_physics_timer();
+                        ctx.render();
+                    }
                 }
             });
             LRESULT(0)
@@ -503,35 +505,40 @@ unsafe extern "system" fn wnd_proc(
             let local_x = (lparam.0 & 0xFFFF) as i16 as f32;
             let local_y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
 
-            APP_CTX.with(|cell| {
-                if let Some(ctx) = cell.borrow_mut().as_mut() {
-                    let hit = ctx
-                        .state
-                        .hit_zones
-                        .iter()
-                        .find(|z| z.contains(local_x, local_y))
-                        .map(|z| z.control);
-                    if let Some(ctrl) = hit {
-                        ctx.handle_control_click(ctrl);
+            let _ = APP_CTX.try_with(|cell| {
+                if let Ok(mut borrow) = cell.try_borrow_mut() {
+                    if let Some(ctx) = borrow.as_mut() {
+                        let hit = ctx
+                            .state
+                            .hit_zones
+                            .iter()
+                            .find(|z| z.contains(local_x, local_y))
+                            .map(|z| z.control);
+                        if let Some(ctrl) = hit {
+                            ctx.handle_control_click(ctrl);
+                        }
                     }
                 }
             });
             LRESULT(0)
         }
         WM_RBUTTONUP => {
-            // Right-clicking the island collapses it if expanded, or shows the quick context menu
-            let handled_collapse = APP_CTX.with(|cell| {
-                if let Some(ctx) = cell.borrow_mut().as_mut() {
-                    if ctx.state.mode == DisplayMode::Expanded {
-                        ctx.state.mode = DisplayMode::Default;
-                        ctx.state.sync_spring_targets();
-                        ctx.ensure_physics_timer();
-                        ctx.render();
-                        return true;
+            let handled_collapse = APP_CTX
+                .try_with(|cell| {
+                    if let Ok(mut borrow) = cell.try_borrow_mut() {
+                        if let Some(ctx) = borrow.as_mut() {
+                            if ctx.state.mode == DisplayMode::Expanded {
+                                ctx.state.mode = DisplayMode::Default;
+                                ctx.state.sync_spring_targets();
+                                ctx.ensure_physics_timer();
+                                ctx.render();
+                                return true;
+                            }
+                        }
                     }
-                }
-                false
-            });
+                    false
+                })
+                .unwrap_or(false);
             if !handled_collapse {
                 show_tray_context_menu(hwnd);
             }
@@ -539,16 +546,18 @@ unsafe extern "system" fn wnd_proc(
         }
         WM_MOUSEWHEEL => {
             let delta = ((wparam.0 >> 16) & 0xFFFF) as i16;
-            APP_CTX.with(|cell| {
-                if let Some(ctx) = cell.borrow_mut().as_mut() {
-                    if ctx.state.mode == DisplayMode::Expanded {
-                        if delta < 0 {
-                            ctx.state.cycle_page(1);
-                        } else if delta > 0 {
-                            ctx.state.cycle_page(-1);
+            let _ = APP_CTX.try_with(|cell| {
+                if let Ok(mut borrow) = cell.try_borrow_mut() {
+                    if let Some(ctx) = borrow.as_mut() {
+                        if ctx.state.mode == DisplayMode::Expanded {
+                            if delta < 0 {
+                                ctx.state.cycle_page(1);
+                            } else if delta > 0 {
+                                ctx.state.cycle_page(-1);
+                            }
+                            ctx.ensure_physics_timer();
+                            ctx.render();
                         }
-                        ctx.ensure_physics_timer();
-                        ctx.render();
                     }
                 }
             });
@@ -572,11 +581,13 @@ unsafe extern "system" fn wnd_proc(
             DragFinish(hdrop);
 
             if !dropped_paths.is_empty() {
-                APP_CTX.with(|cell| {
-                    if let Some(ctx) = cell.borrow_mut().as_mut() {
-                        ctx.state.add_dropped_files(dropped_paths);
-                        ctx.ensure_physics_timer();
-                        ctx.render();
+                let _ = APP_CTX.try_with(|cell| {
+                    if let Ok(mut borrow) = cell.try_borrow_mut() {
+                        if let Some(ctx) = borrow.as_mut() {
+                            ctx.state.add_dropped_files(dropped_paths);
+                            ctx.ensure_physics_timer();
+                            ctx.render();
+                        }
                     }
                 });
             }
@@ -584,15 +595,17 @@ unsafe extern "system" fn wnd_proc(
         }
         WM_HOTKEY => {
             if wparam.0 as i32 == HOTKEY_ID_TOGGLE {
-                APP_CTX.with(|cell| {
-                    if let Some(ctx) = cell.borrow_mut().as_mut() {
-                        ctx.state.visible = !ctx.state.visible;
-                        if ctx.state.visible {
-                            ctx.state.mode = DisplayMode::Default;
-                            ctx.state.sync_spring_targets();
-                            ctx.ensure_physics_timer();
+                let _ = APP_CTX.try_with(|cell| {
+                    if let Ok(mut borrow) = cell.try_borrow_mut() {
+                        if let Some(ctx) = borrow.as_mut() {
+                            ctx.state.visible = !ctx.state.visible;
+                            if ctx.state.visible {
+                                ctx.state.mode = DisplayMode::Default;
+                                ctx.state.sync_spring_targets();
+                                ctx.ensure_physics_timer();
+                            }
+                            ctx.render();
                         }
-                        ctx.render();
                     }
                 });
             }
@@ -609,35 +622,41 @@ unsafe extern "system" fn wnd_proc(
             let cmd_id = wparam.0 & 0xFFFF;
             match cmd_id {
                 MENU_TOGGLE_VISIBILITY => {
-                    APP_CTX.with(|cell| {
-                        if let Some(ctx) = cell.borrow_mut().as_mut() {
-                            ctx.state.visible = !ctx.state.visible;
-                            ctx.render();
+                    let _ = APP_CTX.try_with(|cell| {
+                        if let Ok(mut borrow) = cell.try_borrow_mut() {
+                            if let Some(ctx) = borrow.as_mut() {
+                                ctx.state.visible = !ctx.state.visible;
+                                ctx.render();
+                            }
                         }
                     });
                 }
                 MENU_OPEN_CUSTOMIZER => {
-                    APP_CTX.with(|cell| {
-                        if let Some(ctx) = cell.borrow_mut().as_mut() {
-                            ctx.state.visible = true;
-                            ctx.state.mode = DisplayMode::Expanded;
-                            ctx.state.set_page(ActivePage::Customize);
-                            ctx.ensure_physics_timer();
-                            ctx.render();
+                    let _ = APP_CTX.try_with(|cell| {
+                        if let Ok(mut borrow) = cell.try_borrow_mut() {
+                            if let Some(ctx) = borrow.as_mut() {
+                                ctx.state.visible = true;
+                                ctx.state.mode = DisplayMode::Expanded;
+                                ctx.state.set_page(ActivePage::Customize);
+                                ctx.ensure_physics_timer();
+                                ctx.render();
+                            }
                         }
                     });
                 }
                 MENU_SIMULATE_ALERT => {
-                    APP_CTX.with(|cell| {
-                        if let Some(ctx) = cell.borrow_mut().as_mut() {
-                            ctx.state.visible = true;
-                            ctx.state.trigger_notification(
-                                "Pillify",
-                                "Interactive Notch Ready ✨",
-                                "Click the island to morph open, scroll to switch tabs!",
-                            );
-                            ctx.ensure_physics_timer();
-                            ctx.render();
+                    let _ = APP_CTX.try_with(|cell| {
+                        if let Ok(mut borrow) = cell.try_borrow_mut() {
+                            if let Some(ctx) = borrow.as_mut() {
+                                ctx.state.visible = true;
+                                ctx.state.trigger_notification(
+                                    "Pillify",
+                                    "Interactive Notch Ready ✨",
+                                    "Click the island to morph open, scroll to switch tabs!",
+                                );
+                                ctx.ensure_physics_timer();
+                                ctx.render();
+                            }
                         }
                     });
                 }
@@ -650,29 +669,31 @@ unsafe extern "system" fn wnd_proc(
         }
         WM_TIMER => {
             let timer_id = wparam.0;
-            APP_CTX.with(|cell| {
-                if let Some(ctx) = cell.borrow_mut().as_mut() {
-                    if timer_id == TIMER_ID_PHYSICS {
-                        let now = Instant::now();
-                        let dt = (now - ctx.last_frame).as_secs_f32().clamp(0.001, 0.05);
-                        ctx.last_frame = now;
+            let _ = APP_CTX.try_with(|cell| {
+                if let Ok(mut borrow) = cell.try_borrow_mut() {
+                    if let Some(ctx) = borrow.as_mut() {
+                        if timer_id == TIMER_ID_PHYSICS {
+                            let now = Instant::now();
+                            let dt = (now - ctx.last_frame).as_secs_f32().clamp(0.001, 0.05);
+                            ctx.last_frame = now;
 
-                        let springs_moving = ctx.state.animator.step_all(dt);
-                        let periodic_dirty = ctx.state.tick_periodic(dt);
+                            let springs_moving = ctx.state.animator.step_all(dt);
+                            let periodic_dirty = ctx.state.tick_periodic(dt);
 
-                        ctx.render();
-
-                        if !springs_moving && !periodic_dirty {
-                            ctx.stop_physics_timer_if_idle();
-                        }
-                    } else if timer_id == TIMER_ID_TELEMETRY {
-                        let mut dirty = ctx.services.poll_lightweight(&mut ctx.state);
-                        if !ctx.physics_timer_running {
-                            dirty |= ctx.state.tick_periodic(0.3);
-                        }
-                        if dirty {
-                            ctx.ensure_physics_timer();
                             ctx.render();
+
+                            if !springs_moving && !periodic_dirty {
+                                ctx.stop_physics_timer_if_idle();
+                            }
+                        } else if timer_id == TIMER_ID_TELEMETRY {
+                            let mut dirty = ctx.services.poll_lightweight(&mut ctx.state);
+                            if !ctx.physics_timer_running {
+                                dirty |= ctx.state.tick_periodic(0.3);
+                            }
+                            if dirty {
+                                ctx.ensure_physics_timer();
+                                ctx.render();
+                            }
                         }
                     }
                 }
