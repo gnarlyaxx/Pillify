@@ -4,29 +4,32 @@ Native Windows 10/11 top-bezel interactive notch and dynamic capsule written in 
 
 ## Architecture
 
-- **Renderer (`src/renderer.rs`)**: Hardware-accelerated Direct2D and DirectWrite rendering into a 32-bit premultiplied-alpha DIB section presented via `UpdateLayeredWindow`.
-- **Physics (`src/spring.rs`)**: Semi-implicit Euler damped harmonic oscillator (`Snappy`, `Bouncy`, and `Smooth` profiles). The render timer runs at 120 Hz during active motion and halts completely (`WaitMessage`) when springs reach equilibrium.
+- **Renderer (`src/renderer.rs`)**: Hardware-accelerated Direct2D and DirectWrite rendering into a 32-bit premultiplied-alpha DIB section presented via `UpdateLayeredWindow`. Includes custom cubic-Bezier top-bezel MacBook notch ear geometry (`ID2D1PathGeometry`), axis-aligned viewport clipping (`PushAxisAlignedClip`), and character-ellipsis text trimming.
+- **Physics (`src/spring.rs`)**: Semi-implicit Euler damped harmonic oscillator (`Snappy`, `Bouncy`, and `Smooth` profiles) driving capsule dimensions, corner radii, tab transitions, and continuous vertical lyric scrolling. The render timer runs at 120 Hz during active motion and halts (`WaitMessage`) when springs reach equilibrium.
 - **Hit-Testing (`src/main.rs`)**: Per-frame bounding evaluation on `WM_NCHITTEST`. Coordinates outside the active capsule geometry return `HTTRANSPARENT`, passing mouse events directly to underlying windows.
-- **Telemetry (`src/services.rs`)**: Event-driven and non-blocking WinRT System Media Transport Controls (SMTC), CoreAudio `IAudioEndpointVolume`, `GetSystemPowerStatus`, `NetworkInformation`, and `SHQueryUserNotificationState` fullscreen suppression.
+- **Telemetry & Integrations (`src/services.rs`)**:
+  - **Media & Synced Lyrics**: Non-blocking WinRT System Media Transport Controls (`GlobalSystemMediaTransportControlsSessionManager`) with real-time playback timeline tracking (`GetTimelineProperties`) and automatic LRC timestamped lyrics retrieval via the LRCLIB HTTPS API (`Windows::Web::Http::HttpClient`).
+  - **Shell Icon Extraction (`src/state.rs`)**: Native 32x32 32-bit premultiplied BGRA icon extraction for `.lnk` shortcuts, executables, documents, and folders via `SHGetFileInfoW` and `DrawIconEx`.
+  - **System Sensors**: CoreAudio `IAudioEndpointVolume` listener, `GetSystemPowerStatus` battery readout, `NetworkInformation` SSID detection, and `SHQueryUserNotificationState` fullscreen/Direct3D detection.
 
-## Modules
+## Views
 
-1. **MEDIA**: SMTC transport controls (`PREV`, `PLAY`/`PAUSE`, `NEXT`), real-time 6-band spectrum indicator, network/power telemetry, and focus mode gatekeepers (`STD`, `DND`, `MUTE`).
-2. **SHELF**: Local file and directory staging via Win32 `WM_DROPFILES`. Drag items from File Explorer onto the capsule to stage them for single-click execution.
-3. **FOCUS**: Interval timer (`25M`, `05M`, `15M`), hydration counter, and persistent task checklist.
-4. **CONFIG**: Live geometry and physics calibration (capsule mode, spring damping preset, monochrome/signal accent, width, corner radius, top-bezel ear flare, and border hairline opacity) saved to `%LOCALAPPDATA%\Pillify\config.json`.
+1. **Now Playing**: SMTC media transport controls (`Previous`, `Play`/`Pause`, `Next`), animated 5-bar audio visualizer, Spotify-style vertically scrolling synced lyrics viewport, live progress bar with elapsed/remaining timestamps, system status bar, and `Focus Mode: ON / OFF` toggle.
+2. **Tray**: Drag-and-drop application shortcut, file, and folder staging via Win32 `WM_DROPFILES`. Renders native shell icons and display names for single-click execution (`ShellExecuteW`).
+3. **Timer**: Configurable Pomodoro focus timer (`25m`, `5m`, `15m`), water intake counter, and quick checklist.
+4. **Notch**: Live geometry and motion calibration (capsule behavior mode, spring physics preset, accent palette, expanded width, corner radius, top-bezel ear flare, and border opacity) persisted to `%LOCALAPPDATA%\Pillify\config.json`.
 
 ## Controls
 
 | Input | Action |
 |---|---|
-| Left-click capsule | Expand notch dashboard |
-| Mouse wheel (while expanded) | Cycle between `MEDIA`, `SHELF`, `FOCUS`, and `CONFIG` |
-| Right-click (while expanded) | Collapse back to compact capsule |
-| Drag files onto capsule | Expand and stage paths in `SHELF` |
-| `Ctrl + Alt + I` | Toggle window visibility |
+| Left-click compact notch | Expand interactive notch |
+| Top navigation pills / Mouse wheel | Switch between `Now Playing`, `Tray`, `Timer`, and `Notch` |
+| Right-click (while expanded) | Collapse back to compact notch |
+| Drag files or `.lnk` shortcuts onto notch | Expand and pin items into `Tray` with native icons |
+| `Ctrl + Alt + I` | Toggle notch visibility |
 
-## Build
+## Build & Test
 
 ```powershell
 cargo test
