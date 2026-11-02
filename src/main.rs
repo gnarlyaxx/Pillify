@@ -9,7 +9,7 @@ mod state;
 use crate::config::{IslandStyle, PillifyConfig};
 use crate::renderer::{D2DRenderer, CANVAS_H, CANVAS_W};
 use crate::services::SystemServices;
-use crate::state::{ActivePage, AppState, DisplayMode, FocusMode, InteractiveControl};
+use crate::state::{ActivePage, AppState, DisplayMode, InteractiveControl};
 use std::cell::RefCell;
 use std::process::Command;
 use std::time::Instant;
@@ -98,9 +98,7 @@ impl AppContext {
         match ctrl {
             InteractiveControl::IslandBody => match self.state.mode {
                 DisplayMode::Default | DisplayMode::NotificationCompact => {
-                    if self.state.focus_mode != FocusMode::Movie {
-                        self.state.mode = DisplayMode::Expanded;
-                    }
+                    self.state.mode = DisplayMode::Expanded;
                 }
                 DisplayMode::Expanded => {}
             },
@@ -120,8 +118,8 @@ impl AppContext {
             InteractiveControl::MediaNext => {
                 self.services.media_next();
             }
-            InteractiveControl::FocusChip(mode) => {
-                self.state.focus_mode = mode;
+            InteractiveControl::FocusModeToggle => {
+                self.state.toggle_focus_mode();
             }
             InteractiveControl::ShelfOpenItem(idx) => {
                 if let Some(entry) = self.state.shelf_items.get(idx) {

@@ -114,11 +114,11 @@ impl Default for PillifyConfig {
             accent_theme: AccentTheme::GraphiteWhite,
             compact_width: 212.0,
             compact_height: 34.0,
-            expanded_width: 456.0,
-            expanded_height: 196.0,
+            expanded_width: 484.0,
+            expanded_height: 244.0,
             top_margin: 8.0,
             ear_flare_radius: 14.0,
-            corner_radius: 20.0,
+            corner_radius: 22.0,
             border_glow_opacity: 0.12,
             auto_hide_fullscreen: true,
             water_glasses_today: 2,
@@ -147,8 +147,8 @@ impl PillifyConfig {
     pub fn sanitize(&mut self) {
         self.compact_width = self.compact_width.clamp(170.0, 340.0);
         self.compact_height = self.compact_height.clamp(30.0, 52.0);
-        self.expanded_width = self.expanded_width.clamp(380.0, 540.0);
-        self.expanded_height = self.expanded_height.clamp(175.0, 260.0);
+        self.expanded_width = self.expanded_width.clamp(420.0, 560.0);
+        self.expanded_height = self.expanded_height.clamp(210.0, 290.0);
         self.top_margin = self.top_margin.clamp(0.0, 24.0);
         self.ear_flare_radius = self.ear_flare_radius.clamp(6.0, 24.0);
         self.corner_radius = self.corner_radius.clamp(12.0, 28.0);
