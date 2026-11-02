@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v1.1.0] - 2026-11-03
 ### Added
-- **Live Synced Lyrics (`src/services.rs`, `src/renderer.rs`)**: Automatic LRC timestamped lyrics fetcher via LRCLIB HTTPS API synchronized to Windows SMTC `TimelineProperties` playback position, rendered in a dedicated 2-line lyrics card inside the `Now Playing` view.
+- **Live Synced Lyrics with Smooth Vertical Scroll (`src/services.rs`, `src/spring.rs`, `src/state.rs`, `src/renderer.rs`)**: Automatic LRC timestamped lyrics fetcher via LRCLIB HTTPS API synchronized to Windows SMTC `TimelineProperties` playback position, rendered with `lyric_scroll` spring physics and Direct2D `PushAxisAlignedClip` viewport masking so lyric lines glide upward and fade out smoothly like Spotify.
 - **Native Application & Shortcut Icon Extraction (`src/state.rs`, `src/renderer.rs`)**: Automatically extracts 32x32 32-bit premultiplied BGRA icons from `.lnk` shortcuts, `.exe` binaries, and folders via Win32 `SHGetFileInfoW` + `DrawIconEx` and renders them as Direct2D bitmaps in `Tray`.
 - **Single Focus Mode On/Off Toggle**: Replaced the 3 static mode buttons with a single `Focus Mode: ON / OFF` toggle pill that suppresses incoming notifications, starts the 25-minute focus timer if idle, and displays a compact focus indicator when collapsed.
 

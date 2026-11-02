@@ -270,6 +270,8 @@ pub struct AppState {
     pub is_muted: bool,
     pub audio_spectrum: [f32; 6],
     pub spectrum_phase: f32,
+    pub active_lyric_index: usize,
+    pub lyric_lines_snapshot: Vec<String>,
     pub synced_lyric_line: String,
     pub next_lyric_line: String,
     pub shared_lyrics: Arc<Mutex<SharedLyricsBuffer>>,
@@ -337,6 +339,8 @@ impl AppState {
             is_muted: false,
             audio_spectrum: [0.25, 0.55, 0.85, 0.45, 0.70, 0.35],
             spectrum_phase: 0.0,
+            active_lyric_index: 0,
+            lyric_lines_snapshot: Vec::new(),
             synced_lyric_line: "Play any song to view live synced lyrics".to_string(),
             next_lyric_line: String::new(),
             shared_lyrics: Arc::new(Mutex::new(SharedLyricsBuffer {
@@ -564,21 +568,33 @@ impl AppState {
         };
 
         if guard.loading {
+            self.lyric_lines_snapshot.clear();
             self.synced_lyric_line = "Fetching synced lyrics...".to_string();
             self.next_lyric_line.clear();
+            self.animator.lyric_scroll.snap(0.0);
             return;
         }
 
         if !guard.lines.is_empty() {
+            if self.lyric_lines_snapshot.len() != guard.lines.len() {
+                self.lyric_lines_snapshot = guard.lines.iter().map(|l| l.text.clone()).collect();
+            }
             let pos = self.playback_position_secs;
             let mut active_idx = 0usize;
             for (idx, line) in guard.lines.iter().enumerate() {
-                if line.timestamp_secs <= pos + 0.25 {
+                if line.timestamp_secs <= pos + 0.20 {
                     active_idx = idx;
                 } else {
                     break;
                 }
             }
+            // If song jumped/restarted far away (> 4 lines), snap immediately; otherwise animate smoothly via spring!
+            if (active_idx as f32 - self.animator.lyric_scroll.value).abs() > 4.5 {
+                self.animator.lyric_scroll.snap(active_idx as f32);
+            } else {
+                self.animator.lyric_scroll.set_target(active_idx as f32);
+            }
+            self.active_lyric_index = active_idx;
             self.synced_lyric_line = guard.lines[active_idx].text.clone();
             self.next_lyric_line = guard
                 .lines
@@ -586,12 +602,15 @@ impl AppState {
                 .map(|l| l.text.clone())
                 .unwrap_or_default();
         } else if !guard.plain_fallback.is_empty() {
+            self.lyric_lines_snapshot.clear();
             self.synced_lyric_line = guard.plain_fallback.clone();
             self.next_lyric_line.clear();
         } else if !self.song_title.is_empty() {
+            self.lyric_lines_snapshot.clear();
             self.synced_lyric_line = format!("♪  {} — {}", self.song_title, self.artist_name);
             self.next_lyric_line.clear();
         } else {
+            self.lyric_lines_snapshot.clear();
             self.synced_lyric_line = "Play any song to view live synced lyrics".to_string();
             self.next_lyric_line.clear();
         }

@@ -9,9 +9,9 @@ use windows::Win32::Graphics::Direct2D::Common::{
 };
 use windows::Win32::Graphics::Direct2D::{
     D2D1CreateFactory, ID2D1DCRenderTarget, ID2D1Factory, ID2D1PathGeometry, ID2D1RenderTarget,
-    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, D2D1_BITMAP_PROPERTIES, D2D1_FACTORY_TYPE_SINGLE_THREADED,
-    D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE,
-    D2D1_ROUNDED_RECT,
+    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+    D2D1_BITMAP_PROPERTIES, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_RENDER_TARGET_PROPERTIES,
+    D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, D2D1_ROUNDED_RECT,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWriteCreateFactory, IDWriteFactory, IDWriteInlineObject, IDWriteTextFormat,
@@ -1096,12 +1096,12 @@ impl D2DRenderer {
             }
         }
 
-        // Dedicated Synced Lyrics Card (2 lines: current active line + upcoming lyric line)
+        // Dedicated Spotify-Style Smooth Scrolling Synced Lyrics Card
         let lyrics_box = D2D_RECT_F {
             left,
             top: top + 78.0,
             right,
-            bottom: top + 132.0,
+            bottom: top + 134.0,
         };
         if let Ok(l_bg) = self
             .dc_target
@@ -1117,45 +1117,75 @@ impl D2DRenderer {
             );
         }
 
-        if state.next_lyric_line.is_empty() {
+        // Clip strictly to the inner area of lyrics_box so outgoing lines slide up & disappear cleanly
+        let clip_rect = D2D_RECT_F {
+            left: lyrics_box.left + 10.0,
+            top: lyrics_box.top + 4.0,
+            right: lyrics_box.right - 10.0,
+            bottom: lyrics_box.bottom - 4.0,
+        };
+        self.dc_target
+            .PushAxisAlignedClip(&clip_rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+
+        if state.lyric_lines_snapshot.is_empty() {
             self.draw_text_clipped(
                 &state.synced_lyric_line,
                 &self.font_semibold_11,
-                D2D_RECT_F {
-                    left: left + 14.0,
-                    top: lyrics_box.top + 6.0,
-                    right: right - 14.0,
-                    bottom: lyrics_box.bottom - 6.0,
-                },
+                clip_rect,
                 color(0.96, 0.96, 1.0, alpha),
                 DWRITE_TEXT_ALIGNMENT_CENTER,
             );
         } else {
-            self.draw_text_clipped(
-                &state.synced_lyric_line,
-                &self.font_semibold_11,
-                D2D_RECT_F {
-                    left: left + 14.0,
-                    top: lyrics_box.top + 6.0,
-                    right: right - 14.0,
-                    bottom: lyrics_box.top + 30.0,
-                },
-                color(1.0, 1.0, 1.0, alpha),
-                DWRITE_TEXT_ALIGNMENT_CENTER,
-            );
-            self.draw_text_clipped(
-                &state.next_lyric_line,
-                &self.font_regular_10,
-                D2D_RECT_F {
-                    left: left + 14.0,
-                    top: lyrics_box.top + 28.0,
-                    right: right - 14.0,
-                    bottom: lyrics_box.bottom - 5.0,
-                },
-                color(0.55, 0.55, 0.60, alpha),
-                DWRITE_TEXT_ALIGNMENT_CENTER,
-            );
+            let scroll_pos = state.animator.lyric_scroll.value;
+            let base_idx = scroll_pos.round() as isize;
+            let line_spacing = 22.0;
+            // Anchor the active line slightly above vertical center so the upcoming line sits naturally below it
+            let active_center_y = lyrics_box.top + 19.0;
+
+            for offset in -2isize..=2isize {
+                let target_idx = base_idx + offset;
+                if target_idx < 0 || (target_idx as usize) >= state.lyric_lines_snapshot.len() {
+                    continue;
+                }
+                let line_str = &state.lyric_lines_snapshot[target_idx as usize];
+                let rel_dist = (target_idx as f32) - scroll_pos;
+                let line_y = active_center_y + rel_dist * line_spacing;
+
+                // Lines scrolling up (rel_dist < 0) fade out rapidly as they rise & vanish at the top edge;
+                // upcoming lines (rel_dist > 0) sit dimmed at the bottom waiting to scroll up into focus.
+                let dist_abs = rel_dist.abs();
+                let line_alpha = if rel_dist < 0.0 {
+                    (1.0 - dist_abs * 1.15).clamp(0.0, 1.0)
+                } else {
+                    (1.0 - dist_abs * 0.55).clamp(0.0, 1.0)
+                };
+
+                if line_alpha > 0.02 {
+                    let is_current = dist_abs < 0.45;
+                    let fmt = if is_current {
+                        &self.font_title_13
+                    } else {
+                        &self.font_medium_11
+                    };
+                    let brightness = if is_current { 1.0 } else { 0.72 };
+                    let row_rect = D2D_RECT_F {
+                        left: clip_rect.left + 4.0,
+                        top: line_y - 11.0,
+                        right: clip_rect.right - 4.0,
+                        bottom: line_y + 11.0,
+                    };
+                    self.draw_text_clipped(
+                        line_str,
+                        fmt,
+                        row_rect,
+                        color(brightness, brightness, brightness, line_alpha * alpha),
+                        DWRITE_TEXT_ALIGNMENT_CENTER,
+                    );
+                }
+            }
         }
+
+        self.dc_target.PopAxisAlignedClip();
 
         // Bottom Row: System Telemetry + Single Focus Mode On/Off Toggle Switch
         let row_y1 = bottom - 26.0;
