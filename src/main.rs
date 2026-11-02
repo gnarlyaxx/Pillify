@@ -158,9 +158,9 @@ impl AppContext {
                 self.state.timer_total_secs = mins * 60;
                 self.state.timer_remaining_secs = mins * 60;
                 self.state.timer_mode_label = match mins {
-                    5 => "SHORT BREAK 05M".to_string(),
-                    15 => "LONG BREAK 15M".to_string(),
-                    _ => "FOCUS 25M".to_string(),
+                    5 => "Short Break".to_string(),
+                    15 => "Long Break".to_string(),
+                    _ => "Focus Session".to_string(),
                 };
             }
             InteractiveControl::WaterAddGlass => {

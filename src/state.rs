@@ -214,7 +214,7 @@ impl AppState {
             is_muted: false,
             audio_spectrum: [0.25, 0.55, 0.85, 0.45, 0.70, 0.35],
             spectrum_phase: 0.0,
-            synced_lyric_line: "SMTC Audio Output Ready".to_string(),
+            synced_lyric_line: "Ready to play".to_string(),
             marquee_offset: 0.0,
             last_volume_change: None,
             toast_app: String::new(),
@@ -225,7 +225,7 @@ impl AppState {
             timer_total_secs: 25 * 60,
             timer_remaining_secs: 25 * 60,
             timer_running: false,
-            timer_mode_label: "FOCUS 25M".to_string(),
+            timer_mode_label: "Focus Session".to_string(),
             last_timer_tick: Instant::now(),
             last_water_reminder: Instant::now(),
         }

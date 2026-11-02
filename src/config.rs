@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IslandStyle {
-    HybridMorph,
     AlwaysNotch,
+    HybridMorph,
     AlwaysFloatingPill,
 }
 
@@ -19,15 +19,15 @@ pub enum SpringPreset {
 impl SpringPreset {
     pub fn params(self) -> (f32, f32) {
         match self {
-            SpringPreset::Bouncy => (265.0, 18.0),
-            SpringPreset::Snappy => (380.0, 27.0),
-            SpringPreset::Smooth => (230.0, 29.0),
+            SpringPreset::Bouncy => (240.0, 17.5),
+            SpringPreset::Snappy => (340.0, 25.0),
+            SpringPreset::Smooth => (210.0, 27.0),
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            SpringPreset::Bouncy => "Bouncy",
+            SpringPreset::Bouncy => "Fluid",
             SpringPreset::Snappy => "Snappy",
             SpringPreset::Smooth => "Smooth",
         }
@@ -53,28 +53,28 @@ pub enum AccentTheme {
 impl AccentTheme {
     pub fn colors(self) -> ((f32, f32, f32), (f32, f32, f32)) {
         match self {
-            AccentTheme::GraphiteWhite => ((0.96, 0.96, 0.96), (0.62, 0.62, 0.65)),
-            AccentTheme::AmberSignal => ((0.96, 0.62, 0.04), (0.78, 0.78, 0.80)),
-            AccentTheme::EmeraldSignal => ((0.16, 0.82, 0.48), (0.78, 0.78, 0.80)),
-            AccentTheme::CobaltSignal => ((0.28, 0.56, 0.98), (0.78, 0.78, 0.80)),
+            AccentTheme::GraphiteWhite => ((0.98, 0.98, 1.0), (0.62, 0.62, 0.66)),
+            AccentTheme::AmberSignal => ((1.0, 0.62, 0.04), (0.68, 0.68, 0.72)),
+            AccentTheme::EmeraldSignal => ((0.19, 0.82, 0.35), (0.68, 0.68, 0.72)),
+            AccentTheme::CobaltSignal => ((0.04, 0.52, 1.0), (0.68, 0.68, 0.72)),
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            AccentTheme::GraphiteWhite => "Monochrome",
+            AccentTheme::GraphiteWhite => "White",
             AccentTheme::AmberSignal => "Amber",
-            AccentTheme::EmeraldSignal => "Emerald",
-            AccentTheme::CobaltSignal => "Cobalt",
+            AccentTheme::EmeraldSignal => "Green",
+            AccentTheme::CobaltSignal => "Blue",
         }
     }
 
     pub fn next(self) -> Self {
         match self {
-            AccentTheme::GraphiteWhite => AccentTheme::AmberSignal,
-            AccentTheme::AmberSignal => AccentTheme::EmeraldSignal,
-            AccentTheme::EmeraldSignal => AccentTheme::CobaltSignal,
-            AccentTheme::CobaltSignal => AccentTheme::GraphiteWhite,
+            AccentTheme::GraphiteWhite => AccentTheme::CobaltSignal,
+            AccentTheme::CobaltSignal => AccentTheme::EmeraldSignal,
+            AccentTheme::EmeraldSignal => AccentTheme::AmberSignal,
+            AccentTheme::AmberSignal => AccentTheme::GraphiteWhite,
         }
     }
 }
@@ -109,32 +109,32 @@ pub struct PillifyConfig {
 impl Default for PillifyConfig {
     fn default() -> Self {
         Self {
-            style: IslandStyle::HybridMorph,
-            spring_preset: SpringPreset::Snappy,
+            style: IslandStyle::AlwaysNotch,
+            spring_preset: SpringPreset::Bouncy,
             accent_theme: AccentTheme::GraphiteWhite,
-            compact_width: 224.0,
-            compact_height: 36.0,
-            expanded_width: 440.0,
-            expanded_height: 204.0,
+            compact_width: 212.0,
+            compact_height: 34.0,
+            expanded_width: 456.0,
+            expanded_height: 196.0,
             top_margin: 8.0,
             ear_flare_radius: 14.0,
-            corner_radius: 18.0,
-            border_glow_opacity: 0.14,
+            corner_radius: 20.0,
+            border_glow_opacity: 0.12,
             auto_hide_fullscreen: true,
             water_glasses_today: 2,
             water_daily_goal: 8,
             water_reminder_minutes: 45,
             todos: vec![
                 TodoTask {
-                    text: "Review system architecture".to_string(),
+                    text: "Review project layout".to_string(),
                     done: true,
                 },
                 TodoTask {
-                    text: "Calibrate notch spring damping".to_string(),
+                    text: "Drop files into Tray".to_string(),
                     done: false,
                 },
                 TodoTask {
-                    text: "Stage files in shelf".to_string(),
+                    text: "Start 25m focus session".to_string(),
                     done: false,
                 },
             ],
@@ -145,14 +145,14 @@ impl Default for PillifyConfig {
 
 impl PillifyConfig {
     pub fn sanitize(&mut self) {
-        self.compact_width = self.compact_width.clamp(180.0, 340.0);
-        self.compact_height = self.compact_height.clamp(32.0, 52.0);
+        self.compact_width = self.compact_width.clamp(170.0, 340.0);
+        self.compact_height = self.compact_height.clamp(30.0, 52.0);
         self.expanded_width = self.expanded_width.clamp(380.0, 540.0);
-        self.expanded_height = self.expanded_height.clamp(180.0, 260.0);
+        self.expanded_height = self.expanded_height.clamp(175.0, 260.0);
         self.top_margin = self.top_margin.clamp(0.0, 24.0);
         self.ear_flare_radius = self.ear_flare_radius.clamp(6.0, 24.0);
-        self.corner_radius = self.corner_radius.clamp(12.0, 26.0);
-        self.border_glow_opacity = self.border_glow_opacity.clamp(0.06, 0.45);
+        self.corner_radius = self.corner_radius.clamp(12.0, 28.0);
+        self.border_glow_opacity = self.border_glow_opacity.clamp(0.05, 0.45);
         self.water_daily_goal = self.water_daily_goal.clamp(4, 16);
         self.water_glasses_today = self.water_glasses_today.min(30);
         self.todos.truncate(12);

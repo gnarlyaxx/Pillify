@@ -1,6 +1,6 @@
 [package]
 name = "pillify"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 authors = ["Pillify Contributors"]
 description = "Native Windows 10/11 interactive notch and dynamic capsule powered by Rust and Direct2D."

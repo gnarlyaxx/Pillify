@@ -5,6 +5,10 @@ All notable changes to **Pillify** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.0.2] - 2026-11-03
+### Changed
+- **macOS Notch / Dynamic Island Visual Refinement**: Set default geometry to flush top-bezel MacBook Notch (`AlwaysNotch`, `#000000` pitch-black) with fluid `Bouncy` spring physics, full-capsule pill controls (`Now Playing`, `Tray`, `Timer`, `Notch`), and crisp native `Segoe Fluent Icons` media transport glyphs.
+
 ## [v1.0.1] - 2026-11-03
 ### Changed
 - **Anti-Slop UI & Typography Overhaul**: Replaced all emojis, decorative badges, and neon gradients with a high-contrast matte black (`#09090B`) hardware aesthetic, 1px structural hairlines, and monospace (`Consolas`) + `Segoe UI Variable Text` technical readouts.

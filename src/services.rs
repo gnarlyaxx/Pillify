@@ -226,9 +226,9 @@ impl SystemServices {
             state.artist_name = artist;
             if track_changed {
                 state.synced_lyric_line = if state.song_title.is_empty() {
-                    "SMTC Audio Output Ready".to_string()
+                    "Ready to play".to_string()
                 } else if state.artist_name.is_empty() {
-                    format!("ACTIVE // {}", state.song_title)
+                    state.song_title.clone()
                 } else {
                     format!("{} — {}", state.song_title, state.artist_name)
                 };
