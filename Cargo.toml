@@ -1,6 +1,6 @@
 [package]
 name = "pillify"
-version = "2.0.0"
+version = "1.0.0"
 edition = "2021"
 authors = ["Pillify Contributors"]
 description = "Pillify — Ultra-lightweight NUSA-style interactive Dynamic Island & Custom Notch for Windows 10/11 powered by Rust & Direct2D GPU Composition."

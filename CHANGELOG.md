@@ -5,7 +5,7 @@ All notable changes to **Pillify** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v2.0.0] - 2026-11-03
+## [v1.0.0] - 2026-11-03
 ### Added
 - **Full Rust + Direct2D GPU Rewrite (`Pillify`)**: Complete migration from .NET 10 WPF to native Rust (`windows-rs` + Direct2D + DirectWrite + `UpdateLayeredWindow` premultiplied alpha) with 0% CPU usage when idle.
 - **Real Spring Physics Engine (`src/spring.rs`)**: Damped harmonic oscillator with velocity preservation and 3 user-selectable physics presets (`Bouncy`, `Snappy`, `Smooth`).
